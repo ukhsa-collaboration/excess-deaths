@@ -1,0 +1,477 @@
+---
+params:
+  mytitle: NA
+  mysubtitle: NA
+  author: NA
+  stakeholder: NA
+  eng_charts: NA
+  eng_as_charts: NA
+  region_charts: NA
+  utla_lkp: NA
+  england_ethnicity_sex: NA
+  england_deprivation: NA
+  all_ucods: NA
+  dementia_mentions_vis: NA
+  ari_mentions_vis: NA
+  dm_vis: NA
+  all_pods: NA
+title: "`r params$mytitle`"
+subtitle: "`r params$mysubtitle`"
+author: "`r params$author`"
+output: 
+  bookdown::html_document2:
+    number_sections: false
+    css: html_phe.css
+    toc: true
+    toc_depth: 3
+    includes:
+      in_header: phe_logo.html
+---
+
+```{r knitr_init, echo=FALSE, cache=FALSE, message=FALSE}
+library(knitr)
+library(dplyr)
+library(patchwork)
+
+source(here::here("R/utils_phecharts.R"))
+source(here::here("R/utils.R"))
+
+## Global options
+opts_chunk$set(echo=FALSE,
+               cache=FALSE,
+               fig.width=12,
+               fig.height=6,
+               out.width='100%',
+               warning=FALSE)
+
+```
+
+```{r stakeholder}
+if (params$stakeholder == "internal") {
+  evaluate <- TRUE
+  width <- 19
+  height <- 6
+} else if (params$stakeholder == "external") {
+  evaluate <- FALSE
+  width <- 10
+  height <- 6
+}
+
+```
+
+`r paste("Generated on", Sys.Date())`
+
+## Introduction
+
+Monitoring excess mortality provides understanding of the impact of COVID-19 during the course of the pandemic and beyond. Excess mortality in this report is defined as the number of deaths in 2020 which are above the number expected based on mortality rates in earlier years.   
+
+In this report the expected number of deaths is modelled using five years of data from preceding years to estimate the number of deaths we would expect on each day in 2020. Excess deaths are estimated by week and in total since 20 March 2020, based on the date each death was registered rather than when it occurred. Excess deaths are presented by age, sex, region, ethnic group, level of deprivation, cause of death and place of death.
+
+## All Persons
+
+```{r eng-weekly-sans-baseline, fig.width=13, fig.height=10, fig.cap="Weekly excess deaths by date of registration, England."}
+eng_charts$weekly_simple$England
+```
+
+```{r commentary-calculations}
+wk_end_24_04 <- eng_charts$cumulative$England$data %>% 
+  filter(date %in% as.Date(c("2020-04-18", "2020-04-25"))) %>% 
+  mutate(wkly_exp = model_cumulative - lag(model_cumulative),
+         wkly_reg = deaths_cumulative - lag(deaths_cumulative))
+
+
+example_difference <- scales::comma(round_correct(wk_end_24_04$wkly_reg[2] - wk_end_24_04$wkly_exp[2], 0),
+                                    accuracy = 1)
+example_ratio <- round_correct(wk_end_24_04$wkly_reg[2] / wk_end_24_04$wkly_exp[2], 2)
+```
+
+
+The trend in total excess deaths by week, in England, since week ending 27 March 2020 is shown in Figure \@ref(fig:eng-weekly-sans-baseline). Numbers above each of the columns show the total number of excess deaths and how these compare with the expected number based on modelled estimates for 2015 to 2019. For example, in week ending 24 April there were `r example_difference` excess deaths and this was almost double (`r example_ratio` times higher) the expected number of deaths in this week.  When fewer deaths than expected occur in a week, the column is coloured grey.    
+
+Excess deaths where COVID-19 was mentioned on the death certificate are shown in orange. If the number of deaths is not shown in the orange part of the column, that means the total excess was less than the number of deaths with a mention of COVID-19, indicating fewer deaths from other causes than expected in these weeks.  
+
+The number of excess deaths without COVID-19 mentioned on the certificate (shown in the white part of the column) may be due to an increase in deaths from other causes during the period of the pandemic but may also reflect under-reporting of deaths involving COVID-19.
+
+```{r eng-cum, fig.height=8, fig.cap="Cumulative deaths since 20 March 2020, by date of registration, England."}
+eng_charts$cumulative$England
+```
+
+The trend in the total cumulative number of excess deaths in England since 20 March 2020 is shown in Figure \@ref(fig:eng-cum).   
+
+## Age Group Males 
+
+```{r eng-as-weekly-males, fig.height=23.3, fig.cap="Weekly excess deaths, by date of registration and age group, males, England."}
+eng_as_charts$weekly_simple$England$Males
+
+```
+
+The trend in excess deaths for males by age group is shown in Figure \@ref(fig:eng-as-weekly-males), which allows the extent of the excess each week to be compared over time and between age groups.
+
+```{r eng-cum-as-compare-males, fig.width=13.5, fig.height=7, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by age group, males, England."}
+eng_as_charts$cumulative_compare$England$Males$cumulative_chart_num + eng_as_charts$cumulative_compare$England$Males$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:eng-cum-as-compare-males)A for males can be used to compare the cumulative total of excess deaths since 20 March 2020 between age groups.  
+
+Figure \@ref(fig:eng-cum-as-compare-males)B compares the cumulative total of excess deaths among males with the number which would have been expected based on the modelled estimates for earlier years. Where the ratio of observed to expected is less than 1, this is shown in grey. The proportion of the excess where COVID-19 was mentioned on the death certificate is shown in yellow.
+
+```{r eng-cum-as-compare-males-table}
+eng_as_charts$cumulative_compare$England$Males$cumulative_table %>%
+  gt::tab_header(title = "Table 1 - Males") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+<br>
+<br>
+
+> **Why ratios are important** 
+>
+> Ratios can be useful for comparing between groups when the expected number is very different between groups.  
+>
+> For example, if group A had 5 excess deaths and group B had 10, it could appear that the impact was twice as high in group B. However, if the expected number of deaths was 1 in group A and 5 in group B, and the registered numbers of deaths were 6 and 15 respectively, then the ratios would show that group A experienced 6 times the number of deaths compared to expected, while group B experienced 3 times the number expected. Therefore, the actual relative impact is higher in group A.
+>
+> The ratios presented in this report are relative to historical trends within each group, and not in relation to another group. For example, in the ethnicity section the ratio for the Asian group is the ratio between deaths in this group registered in 2020 and the estimate of expected deaths in the Asian group based on the preceding 5 years. It is not the ratio between the Asian group and another ethnic group.
+
+## Age Group Females
+
+```{r eng-as-weekly-females, fig.height=23.3, fig.cap="Weekly excess deaths, by date of registration and age group, females, England."}
+eng_as_charts$weekly_simple$England$Females
+
+```
+
+The trend in excess deaths for females by age group is shown in Figure \@ref(fig:eng-as-weekly-females), which allows the extent of the excess each week to be compared over time and between age groups.
+
+```{r eng-cum-as-compare-females, fig.width=13.5, fig.height=7, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by age group, females, England."}
+eng_as_charts$cumulative_compare$England$Females$cumulative_chart_num + eng_as_charts$cumulative_compare$England$Females$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:eng-cum-as-compare-females)A for females can be used to compare the cumulative total of excess deaths since 20 March 2020 between age groups.  
+
+Figure \@ref(fig:eng-cum-as-compare-females)B shows the ratio of the observed to the expected deaths by age group among females since 20 March 2020. This chart can be used to compare the relative excess mortality between age groups. 
+
+```{r eng-cum-as-compare-females-table}
+eng_as_charts$cumulative_compare$England$Females$cumulative_table %>%
+  gt::tab_header(title = "Table 2 - Females") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+## Ethnic Group Males
+
+```{r eng-eth-weekly-males, fig.height=20, fig.cap="Weekly excess deaths, by date of registration and ethnic group, males, England."}
+england_ethnicity_sex$weekly_simple$England$Males
+
+```
+
+The trend in excess deaths for males is shown in Figure \@ref(fig:eng-eth-weekly-males), which allows the extent of the excess each week to be compared over time and between ethnic groups. 
+
+```{r eng-cum-ethsex-compare-m, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by ethnic group, males, England."}
+england_ethnicity_sex$cumulative_compare$England$Males$cumulative_chart_num + england_ethnicity_sex$cumulative_compare$England$Males$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:eng-cum-ethsex-compare-m)A for males can be used to compare the cumulative total of excess deaths since 20 March 2020 between ethnic groups. 
+
+Figure \@ref(fig:eng-cum-ethsex-compare-m)B shows the ratio of the observed to the expected deaths by ethnic group among males since 20 March 2020. This chart can be used to compare relative excess mortality between ethnic groups. 
+
+```{r eng-cum-ethsex-compare-m-table}
+england_ethnicity_sex$cumulative_compare$England$Males$cumulative_table %>%
+  gt::tab_header(title = "Table 3 - Males") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+
+## Ethnic Group Females
+
+```{r eng-eth-weekly-females, fig.height=20, fig.cap="Weekly excess deaths, by date of registration and ethnic group, females, England."}
+england_ethnicity_sex$weekly_simple$England$Females
+
+```
+
+The trend in excess deaths for females is shown in Figure \@ref(fig:eng-eth-weekly-females), which allows the extent of the excess each week to be compared over time and between ethnic groups.
+
+```{r eng-cum-ethsex-compare-f, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by ethnic group, females, England."}
+england_ethnicity_sex$cumulative_compare$England$Females$cumulative_chart_num + england_ethnicity_sex$cumulative_compare$England$Females$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:eng-cum-ethsex-compare-f)A for females can be used to compare the cumulative total of excess deaths since 20 March 2020 between ethnic groups. 
+
+Figure \@ref(fig:eng-cum-ethsex-compare-f)B shows the ratio of the observed to the expected deaths by ethnic group among females since 20 March 2020. This chart can be used to compare relative excess mortality between ethnic groups.
+
+```{r eng-cum-ethsex-compare-f-table}
+england_ethnicity_sex$cumulative_compare$England$Females$cumulative_table %>%
+  gt::tab_header(title = "Table 4 - Females") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+<br>
+<br>
+
+> **Ethnicity coding**
+>
+> Ethnicity is not collected at death registration, so these estimates were made by linking death records to hospital records to find the ethnicity of the deceased. This approach has some limitations. Ethnicity is supposed to be self-reported by the patient in hospital records, but this may not always be the case. Patients may also report different ethnicities in different episodes of care. For this analysis the most recent reported ethnic group was used. Population estimates have been used to calculate mortality rates to estimate the expected numbers of deaths, and these were based on the 2011 Census. This may lead to a mismatch between ethnicity reported in hospital records and self-reported ethnicity in the census. It appears, for example, that more people are assigned to the ‘Other’ group in hospital records than in the 2011 Census.
+
+## Deprivation
+
+```{r dep-weekly, fig.height=20, fig.cap="Weekly excess deaths, by date of registration and deprivation quintile, England"}
+england_deprivation$weekly_simple$England
+```
+
+The trend in excess deaths among deprivation quintiles is shown in Figure \@ref(fig:dep-weekly), which allows the extent of the excess each week to be compared over time and between deprivation quintiles.
+
+```{r dep-cum-compare, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by deprivation quintile, England"}
+england_deprivation$cumulative_compare$England$cumulative_chart_num + england_deprivation$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:dep-cum-compare)A can be used to compare the cumulative total of excess deaths since 20 March 2020 between deprivation quintiles. 
+
+Figure \@ref(fig:dep-cum-compare)B shows the ratio of the observed to the expected deaths by deprivation quintile since 20 March 2020. This chart can be used to compare relative excess mortality between deprivation quintiles.
+
+```{r dep-cum-compare_table}
+england_deprivation$cumulative_compare$England$cumulative_table %>%
+  gt::tab_header(title = "Table 5") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+## Region  {.tabset .tabset-fade .tabset-pills}
+
+```{r region-figure-captions}
+reg_fig_cap <- paste0("Weekly excess deaths by date of registration, ",
+                      names(region_charts$weekly_simple$England),
+                      ".")
+
+```
+
+
+```{r regions-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=reg_fig_cap}
+
+for (region in names(region_charts$weekly_simple$England)) {
+  cat(paste("###", region, "\n"))
+  print(region_charts$weekly_simple$England[[region]])
+  cat('\n\n')
+}
+```
+
+## {.unlisted .unnumbered}
+
+The trend in excess deaths by region is shown in Figures \@ref(fig:regions-weekly1) to \@ref(fig:regions-weekly9), which allows the extent of the excess each week to be compared over time and for selected regions.
+
+```{r region-cum-compare, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by region, England."}
+region_charts$cumulative_compare$England$cumulative_chart_num + region_charts$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:region-cum-compare)A can be used to compare the cumulative total of excess deaths since 20 March 2020 between regions.
+
+Figure \@ref(fig:region-cum-compare)B shows the ratio of the observed to the expected deaths by region since 20 March 2020. This chart can be used to compare relative excess mortality between regions.
+
+
+```{r region-cum-compare-table}
+region_charts$cumulative_compare$England$cumulative_table %>%
+  gt::tab_header(title = "Table 6") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+## Deaths by Underlying Cause {.tabset .tabset-fade .tabset-pills}
+
+```{r ucod-figure-captions}
+cause_levels <- model_references() %>% 
+  filter(!is.na(reference),
+         caption != "") %>%
+  mutate(reference = gsub("^All other", "all other", reference)) %>% 
+  pull(reference) %>% 
+  rev()
+
+ucod_fig_cap <- paste0("Weekly excess deaths by date of registration, ",
+                      cause_levels,
+                      ", England.")
+
+```
+
+```{r deaths-by-cause-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=ucod_fig_cap}
+cat("### Ischaemic heart diseases \n")
+print(all_ucods$weekly_simple$England$`ischaemic heart diseases`)
+cat('\n\n')
+
+cat("### Stroke (cerebrovascular diseases)\n")
+print(all_ucods$weekly_simple$England$`cerebrovascular diseases`)
+cat('\n\n')
+
+cat("### Other circulatory diseases \n")
+print(all_ucods$weekly_simple$England$`other circulatory diseases`)
+cat('\n\n')
+
+
+cat("### Cancer \n")
+print(all_ucods$weekly_simple$England$cancer)
+cat('\n\n')
+
+cat("### Acute respiratory infections (including flu/pneumonia) \n")
+print(all_ucods$weekly_simple$England$`acute respiratory infections`)
+cat('\n\n')
+
+cat("### Chronic lower respiratory diseases \n")
+print(all_ucods$weekly_simple$England$`chronic lower respiratory diseases`)
+cat('\n\n')
+
+cat("### Other respiratory diseases \n")
+print(all_ucods$weekly_simple$England$`other respiratory diseases`)
+cat('\n\n')
+
+cat("### Dementia and Alzheimer’s disease \n")
+print(all_ucods$weekly_simple$England$`dementia and Alzheimer's`)
+cat('\n\n')
+
+
+cat("### Diseases of the urinary system \n")
+print(all_ucods$weekly_simple$England$`diseases of the urinary system`)
+cat('\n\n')
+
+cat("### Cirrhosis and other liver disease \n")
+print(all_ucods$weekly_simple$England$`cirrhosis and other liver diseases`)
+cat('\n\n')
+
+cat("### Parkinson's disease \n")
+print(all_ucods$weekly_simple$England$`Parkinson's disease`)
+cat('\n\n')
+
+cat("### Other causes (excluding COVID-19) \n")
+print(all_ucods$weekly_simple$England$`All other causes (excl. COVID-19)`)
+cat('\n\n')
+
+
+```
+
+## {.unlisted .unnumbered}
+
+The trend in excess deaths for selected underlying causes of death (UCOD) is shown in Figures \@ref(fig:deaths-by-cause-weekly1) to \@ref(fig:deaths-by-cause-weekly12) which allow the extent of the excess to be compared over time for each cause. For each cause, the number of excess deaths without COVID-19 mentioned on the certificate (shown in the white part of the column) may be due to an increase in deaths from this cause during the period of the pandemic,  but may also reflect under-reporting of deaths involving COVID-19.
+
+```{r ucods-cumulative-compare, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by underlying cause of death, England"}
+all_ucods$cumulative_compare$England$cumulative_chart_num + all_ucods$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:ucods-cumulative-compare)A shows the total cumulative excess deaths by UCOD since 20 March 2020. The chart can be used to compare the number of excess deaths for each UCOD.  
+
+This chart can be used to compare the cumulative total of excess deaths since 20 March 2020 between underlying causes.  
+
+Figure \@ref(fig:ucods-cumulative-compare)B shows the ratio of the observed to the expected deaths by UCOD since 20 March 2020. This chart can be used to compare relative excess mortality between underlying causes of death.  
+
+```{r ucods-cumulative-compare-table}
+all_ucods$cumulative_compare$England$cumulative_table %>%
+  gt::tab_header(title = "Table 7") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+## Deaths with a Mention of Specific Causes {.tabset .tabset-fade .tabset-pills}
+
+```{r mentions-figure-captions}
+mentions_fig_cap <- paste0("Weekly excess deaths by date of registration, all mentions of",
+                           c(" dementia and Alzheimer's disease",
+                             " acute respiratory infections",
+                             " diabetes mellitus"),
+                           ", England.")
+
+```
+
+```{r deaths-by-cause-mentions-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=mentions_fig_cap}
+cat("### Dementia and Alzheimer’s disease \n")
+print(dementia_mentions_vis$weekly_simple$England)
+cat('\n\n')
+
+cat("### Acute respiratory infections (including flu/pneumonia) \n")
+print(ari_mentions_vis$weekly_simple$England)
+cat('\n\n')
+
+cat("### Diabetes Mellitus \n")
+print(dm_vis$weekly_simple$England)
+cat("\n\n")
+
+```
+
+Figures \@ref(fig:deaths-by-cause-mentions-weekly1) to \@ref(fig:deaths-by-cause-mentions-weekly3) show weekly excess deaths where a specific cause was mentioned anywhere on the death certificate. These causes will have contributed to the death but not necessarily been the underlying cause.
+
+## Place of Death {.tabset .tabset-fade .tabset-pills}
+
+```{r pod-figure-captions}
+pod_fig_cap <- paste0("Weekly excess deaths by date of registration,",
+                           c(" own home",
+                             " care home (nursing or residential)",
+                             " hospital (acute or community, not psychiatric)",
+                             " hospice",
+                             " other places"),
+                           ", England.")
+
+```
+
+```{r place-of-death-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=pod_fig_cap}
+cat("### Own home \n")
+print(all_pods$weekly_simple$England$Home)  
+cat('\n\n')
+
+cat("### Care home (nursing or residential) \n")
+print(all_pods$weekly_simple$England$`Care home (nursing or residential)`)
+cat('\n\n')
+
+cat("### Hospital (acute or community, not psychiatric) \n")
+print(all_pods$weekly_simple$England$`Hospital (acute or community, not psychiatric)`)
+cat('\n\n')
+
+cat("### Hospice \n")
+print(all_pods$weekly_simple$England$Hospice)
+cat('\n\n')
+
+cat("### Other places \n")
+print(all_pods$weekly_simple$England$`Other places`)
+cat('\n\n')
+
+```
+
+## {.unlisted .unnumbered}
+
+Figures \@ref(fig:place-of-death-weekly1) to \@ref(fig:place-of-death-weekly5) show the weekly total excess registered deaths by place of death since week ending 27 March 2020. These charts can be used to understand the trend in excess deaths by place of death. This analysis should be interpreted as excess deaths within each place of death compared to what would have been expected based on data over the past five years.
+
+```{r pod-compare-cumulative, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B), by place of death, England."}
+all_pods$cumulative_compare$England$cumulative_chart_num + all_pods$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:pod-compare-cumulative)A shows the total cumulative excess deaths in each place of death since 20 March 2020. The chart can be used to compare the numbers of excess deaths in each place of death. This chart can be used to compare the cumulative total of excess deaths since 20 March 2020 between places of death.  
+
+Figure \@ref(fig:pod-compare-cumulative)B shows the ratio of the observed to the expected deaths in each place of death since 20 March 2020. This chart can be used to compare relative excess mortality between places of death.
+
+```{r pod-compare-cumulative-table}
+all_pods$cumulative_compare$England$cumulative_table %>%
+  gt::tab_header(title = "Table 8") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+## Comparisons to other measures of excess deaths in England
+
+The Office for National Statistics also publishes a weekly report on excess deaths in England & Wales. The numbers reported by ONS are broadly in line with the overall excess death figures in this report but there are some differences as the ‘expected’ numbers in this report are not just the simple five-year average for 2015 to 2019, as used by ONS. As explained in the Methods, they are instead modelled estimates which adjust for factors such as the ageing of the population and the underlying trend in mortality rates from year to year. The ONS report also defines weeks as seven-day periods ending on a Friday. Excess deaths in this report were estimated only for weekdays, with deaths registered on a Saturday added to the preceding Friday each week.        
+
+EuroMOMO is a European mortality monitoring programme that aims to measure excess deaths related to seasonal influenza and other public health threats that uses a standardised methodology across 24 European countries. The methodology used by EuroMOMO is similar to that used by the PHE model, however, the EuroMOMO model looks at deaths by date of occurrence, and the PHE model looks at deaths by date of registration. Because there is a time lag between date of occurrence of death and date of registration, analysis of excess deaths by date of occurrence requires a delay correction, the reliability of which improves over time.  These two models produce very similar results but with small differences due to the delay correction applied by EuroMOMO.
+
+The PHE Daily GRO mortality model is used in PHE’s COVID-19 surveillance report for all-cause mortality. It uses a 5-year average to estimate expected deaths, similar to that used by the ONS but with a trend included. It looks at deaths by date of occurrence based on rapidly reported deaths from the General Register Office and uses a registration delay correction, the reliability of which improves over time. Overall, the excess deaths are similar in the COVID-19 surveillance report and this report, but may show some differences in specific weeks due to use of occurrence date compared with registration date, and in recent weeks due to the delay corrections.
+
+
+## Links to historic reports
+
+```{r results='asis'}
+server_files <- list.files(Sys.getenv("SERVER_FILE_LOCATION"))
+server_files <- server_files[!grepl("latest.html$", server_files)]
+
+file_dates <- stringr::str_extract(server_files, "\\d{1,2}-[A-Z][a-z]{1,3}-\\d{1,4}")
+file_dates <- as.Date(file_dates, "%d-%b-%Y")
+server_files <- server_files[rev(order(file_dates))]
+cat(paste0('* [', 
+           server_files, 
+           "](https://fingertips.phe.org.uk/static-reports/mortality-surveillance/",
+           server_files,
+           ")"), 
+    sep = '\n')
+```
+

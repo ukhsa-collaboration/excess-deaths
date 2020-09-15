@@ -1,0 +1,344 @@
+---
+params:
+  mytitle: NA
+  mysubtitle: NA
+  author: NA
+  stakeholder: NA
+  rgn_name: NA
+  rgn_charts: NA
+  rgn_as_charts: NA
+  utla_charts: NA
+  region_charts: NA
+  rgn_ethnicity_sex: NA
+  rgn_deprivation: NA
+  rgn_all_ucods: NA
+  rgn_dementia_mentions_vis: NA
+  rgn_ari_mentions_vis: NA
+  rgn_dm_vis: NA
+  rgn_all_pods: NA
+title: "`r params$mytitle`"
+subtitle: "`r params$mysubtitle`"
+output: 
+  bookdown::html_document2:
+    number_sections: false
+    css: html_phe.css
+    toc: true
+    toc_depth: 3
+    includes:
+      in_header: phe_logo.html
+---
+
+```{r knitr_init, echo=FALSE, cache=FALSE, message=FALSE}
+library(knitr)
+library(dplyr)
+library(patchwork)
+
+source(here::here("R/utils_phecharts.R"))
+
+## Global options
+opts_chunk$set(echo=FALSE,
+               cache=FALSE,
+               fig.width=12,
+               fig.height=6,
+               out.width='100%',
+               warning=FALSE)
+
+data_source <- "Source: Public Health England analysis of ONS death registration data"
+```
+
+```{r stakeholder}
+if (params$stakeholder == "internal") {
+  evaluate <- TRUE
+  width <- 19
+  height <- 6
+} else if (params$stakeholder == "external") {
+  evaluate <- FALSE
+  width <- 10
+  height <- 6
+}
+
+```
+
+`r paste("Generated on", Sys.Date())`
+
+## Introduction
+
+Monitoring excess mortality provides understanding of the impact of COVID-19 during the course of the pandemic and beyond. Excess mortality in this report is defined as the number of deaths in 2020 which are above the number expected based on mortality rates in earlier years.   
+
+In this report the expected number of deaths is modelled using five years of data from preceding years to estimate the number of deaths we would expect on each day in 2020. Excess deaths are estimated by week and in total since 20 March 2020, based on the date each death was registered rather than when it occurred. Excess deaths are presented by age, sex, Upper Tier Local Authority, ethnic group, level of deprivation, cause of death and place of death.
+
+## All Persons
+
+```{r caption-persons}
+caption1 <- paste0("Weekly excess deaths by date of registration, ", params$rgn_name, ".")
+caption2 <- paste0("Cumulative deaths since 20 March 2020, by date of registration, ", params$rgn_name, ".")
+
+```
+
+
+```{r rgn-weekly-sans-baseline, fig.width= 13, fig.height=10, fig.cap=caption1}
+rgn_charts$weekly_simple[[params$rgn_name]]
+```
+
+```{r commentary-calculations}
+wk_end_17_04 <- rgn_charts$cumulative[[params$rgn_name]]$data %>% 
+  filter(date %in% as.Date(c("2020-04-11", "2020-04-18"))) %>% 
+  mutate(wkly_exp = model_cumulative - lag(model_cumulative),
+         wkly_reg = deaths_cumulative - lag(deaths_cumulative))
+
+
+example_difference <- scales::comma(round_correct(wk_end_17_04$wkly_reg[2] - wk_end_17_04$wkly_exp[2], 0),
+                                    accuracy = 1)
+example_ratio <- round_correct(wk_end_17_04$wkly_reg[2] / wk_end_17_04$wkly_exp[2], 2)
+```
+
+The trend in total excess deaths by week, in `r params$rgn_name`, since week ending 27 March 2020 is shown in Figure \@ref(fig:rgn-weekly-sans-baseline). Numbers above each of the columns show the total number of excess deaths and how these compare with the expected number based on modelled estimates for 2015 to 2019. For example, in week ending 17 April there were `r example_difference` excess deaths and this was `r wordify_ratio(example_ratio)` times (`r example_ratio` times higher) the expected number of deaths in this week. When fewer deaths than expected occur in a week, the column is coloured grey.    
+
+Excess deaths where COVID-19 was mentioned on the death certificate are shown in orange. If the number of deaths is not shown in the orange part of the column, that means the total excess was less than the number of deaths with a mention of COVID-19, indicating fewer deaths from other causes than expected in these weeks.  
+
+The number of excess deaths without COVID-19 mentioned on the certificate (shown in the white part of the column) may be due to an increase in deaths from other causes during the period of the pandemic but may also reflect under-reporting of deaths involving COVID-19.
+
+```{r rgn-cum, fig.height=8, fig.cap=caption2}
+rgn_charts$cumulative[[params$rgn_name]]
+```
+
+The trend in the total cumulative number of excess deaths in `r params$rgn_name` since 20 March 2020 is shown in Figure \@ref(fig:rgn-cum). 
+
+## Age Group Males 
+
+```{r caption-males-sex}
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by age group, males, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+```{r rgn-cum-as-compare-males, fig.width=13.5, fig.height=7, fig.cap=caption2}
+rgn_as_charts$cumulative_compare[[params$rgn_name]]$Males$cumulative_chart_num + rgn_as_charts$cumulative_compare[[params$rgn_name]]$Males$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:rgn-cum-as-compare-males)A for males can be used to compare the cumulative total of excess deaths since 20 March 2020 between age groups.  
+
+Figure \@ref(fig:rgn-cum-as-compare-males)B compares the cumulative total of excess deaths among males with the number which would have been expected based on the modelled estimates for earlier years. Where the ratio of observed to expected is negative, this is shown in grey. The proportion of the excess where COVID-19 was mentioned on the death certificate is shown in yellow.
+
+
+```{r rgn-cum-as-compare-males-table}
+rgn_as_charts$cumulative_compare[[params$rgn_name]]$Males$cumulative_table %>%
+  gt::tab_header(title = "Table 1 - Males") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+<br>
+<br>
+
+> **Why ratios are important** 
+>
+> Ratios can be useful for comparing between groups when the expected number is very different between groups.  
+>
+> For example, if group A had 5 excess deaths and group B had 10, it could appear that the impact was twice as high in group B. However, if the expected number of deaths was 1 in group A and 5 in group B, and the registered numbers of deaths were 6 and 15 respectively, then the ratios would show that group A experienced 6 times the number of deaths compared to expected, while group B experienced 3 times the number expected. Therefore, the actual relative impact is higher in group A.
+>
+> The ratios presented in this report are relative to historical trends within each group, and not in relation to another group. For example, in the ethnicity section the ratio for the Asian group is the ratio between deaths in this group registered in 2020 and the estimate of expected deaths in the Asian group based on the preceding 5 years. It is not the ratio between the Asian group and another ethnic group.
+
+## Age Group Females
+
+
+```{r caption-females-sex}
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by age group, females, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+```{r rgn-cum-as-compare-females, fig.width=13.5, fig.height=7, fig.cap=caption2}
+rgn_as_charts$cumulative_compare[[params$rgn_name]]$Females$cumulative_chart_num + rgn_as_charts$cumulative_compare[[params$rgn_name]]$Females$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:rgn-cum-as-compare-females)A for females can be used to compare the cumulative total of excess deaths since 20 March 2020 between age groups.  
+
+Figure \@ref(fig:rgn-cum-as-compare-females)B shows the ratio of the observed to the expected deaths by age group among females since 20 March 2020. This chart can be used to compare the relative excess mortality between age groups. 
+
+```{r rgn-cum-as-compare-females-table}
+rgn_as_charts$cumulative_compare[[params$rgn_name]]$Females$cumulative_table %>%
+  gt::tab_header(title = "Table 2 - Females") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+
+## Ethnic Group Males
+
+```{r caption-males-ethnicity}
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by ethnic group, males, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+```{r rgn-cum-ethsex-compare-m, fig.width=13.5, fig.cap=caption2}
+rgn_ethnicity_sex$cumulative_compare[[params$rgn_name]]$Males$cumulative_chart_num + rgn_ethnicity_sex$cumulative_compare[[params$rgn_name]]$Males$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:rgn-cum-ethsex-compare-m)A for males can be used to compare the cumulative total of excess deaths since 20 March 2020 between ethnic groups. 
+
+Figure \@ref(fig:rgn-cum-ethsex-compare-m)B shows the ratio of the observed to the expected deaths by ethnic group among males since 20 March 2020. This chart can be used to compare relative excess mortality between ethnic groups. 
+
+```{r rgn-cum-ethsex-compare-m-table}
+rgn_ethnicity_sex$cumulative_compare[[params$rgn_name]]$Males$cumulative_table %>%
+  gt::tab_header(title = "Table 3 - Males") %>%
+  gt::opt_align_table_header(align = "left")
+```
+
+<br>
+<br>
+
+## Ethnic Group Females
+
+```{r caption-females-ethnic}
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by ethnic group, females, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+
+```{r rgn-cum-ethsex-compare-f, fig.width=13.5, fig.cap=caption2}
+rgn_ethnicity_sex$cumulative_compare[[params$rgn_name]]$Females$cumulative_chart_num + rgn_ethnicity_sex$cumulative_compare[[params$rgn_name]]$Females$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:rgn-cum-ethsex-compare-f)A for females can be used to compare the cumulative total of excess deaths since 20 March 2020 between ethnic groups. 
+
+Figure \@ref(fig:rgn-cum-ethsex-compare-f)B shows the ratio of the observed to the expected deaths by ethnic group among females since 20 March 2020. This chart can be used to compare relative excess mortality between ethnic groups.
+
+```{r rgn-cum-ethsex-compare-f-table}
+rgn_ethnicity_sex$cumulative_compare[[params$rgn_name]]$Females$cumulative_table %>%
+  gt::tab_header(title = "Table 4 - Females") %>%
+  gt::opt_align_table_header(align = "left")
+```
+
+<br>
+<br>
+
+> **Ethnicity coding**
+>
+> Ethnicity is not collected at death registration, so these estimates were made by linking death records to hospital records to find the ethnicity of the deceased. This approach has some limitations. Ethnicity is supposed to be self-reported by the patient in hospital records, but this may not always be the case. Patients may also report different ethnicities in different episodes of care. For this analysis the most recent reported ethnic group was used. Population estimates have been used to calculate mortality rates to estimate the expected numbers of deaths, and these were based on the 2011 Census. This may lead to a mismatch between ethnicity reported in hospital records and self-reported ethnicity in the census. It appears, for example, that more people are assigned to the ‘Other’ group in hospital records than in the 2011 Census.
+
+## Deprivation
+
+```{r caption-deprivation}
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by deprivation quintile, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+
+```{r dep-cum-compare, fig.width=13.5, fig.cap=caption2}
+rgn_deprivation$cumulative_compare[[params$rgn_name]]$cumulative_chart_num + rgn_deprivation$cumulative_compare[[params$rgn_name]]$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:dep-cum-compare)A can be used to compare the cumulative total of excess deaths since 20 March 2020 between deprivation quintiles. 
+
+Figure \@ref(fig:dep-cum-compare)B shows the ratio of the observed to the expected deaths by deprivation quintile since 20 March 2020. This chart can be used to compare relative excess mortality between deprivation quintiles.
+
+```{r dep-cum-compare-table}
+rgn_deprivation$cumulative_compare[[params$rgn_name]]$cumulative_table %>%
+  gt::tab_header(title = "Table 5") %>%
+  gt::opt_align_table_header(align = "left")
+```
+
+## Upper Tier Local Authority  {.tabset .tabset-fade .tabset-pills}
+
+```{r region-figure-captions}
+utla_fig_cap_cumulative <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by Upper Tier Local Authority, ",
+                                  params$rgn_name,
+                                  ".")
+
+```
+
+```{r cumulative-utla-height}
+utla_height <- length(names(utla_charts$weekly_simple[[params$rgn_name]])) * 6 / 12
+```
+
+```{r utla-cum-compare, fig.width=13.5, fig.cap=utla_fig_cap_cumulative, fig.height=utla_height}
+utla_charts$cumulative_compare[[params$rgn_name]]$cumulative_chart_num + utla_charts$cumulative_compare[[params$rgn_name]]$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:utla-cum-compare)A can be used to compare the cumulative total of excess deaths since 20 March 2020 between Upper Tier Local Authorities.
+
+Figure \@ref(fig:utla-cum-compare)B shows the ratio of the observed to the expected deaths by Upper Tier Local Authority since 20 March 2020. This chart can be used to compare relative excess mortality between  Upper Tier Local Authorities.
+
+
+```{r utla-cum-compare-table}
+utla_charts$cumulative_compare[[params$rgn_name]]$cumulative_table %>%
+  gt::tab_header(title = "Table 6") %>%
+  gt::opt_align_table_header(align = "left") %>% 
+  gt::tab_options(container.overflow.x = FALSE)
+```
+
+
+## Deaths by underlying cause {.tabset .tabset-fade .tabset-pills}
+
+```{r caption-ucod}
+cause_levels <- model_references() %>% 
+  filter(!is.na(reference),
+         caption != "") %>%
+  mutate(reference = gsub("^All other", "all other", reference)) %>% 
+  pull(reference) %>% 
+  rev()
+
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by underlying cause of death, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+
+```{r ucods-cumulative-compare, fig.width=13.5, fig.cap=caption2}
+rgn_all_ucods$cumulative_compare[[params$rgn_name]]$cumulative_chart_num + rgn_all_ucods$cumulative_compare[[params$rgn_name]]$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:ucods-cumulative-compare)A shows the total cumulative excess deaths by UCOD since 20 March 2020. The chart can be used to compare the number of excess deaths for each UCOD.  
+
+This chart can be used to compare the cumulative total of excess deaths since 20 March 2020 between underlying causes.  
+
+Figure \@ref(fig:ucods-cumulative-compare)B shows the ratio of the observed to the expected deaths by UCOD since 20 March 2020. This chart can be used to compare relative excess mortality between underlying causes of death. 
+
+```{r ucods-cumulative-compare-table}
+rgn_all_ucods$cumulative_compare[[params$rgn_name]]$cumulative_table %>%
+  gt::tab_header(title = "Table 6") %>%
+  gt::opt_align_table_header(align = "left")
+```
+
+## Place of Death {.tabset .tabset-fade .tabset-pills}
+
+```{r caption-pod}
+
+caption2 <- paste0("Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B), by place of death, ", 
+                   params$rgn_name, 
+                   ".")
+
+```
+
+```{r pod-compare-cumulative, fig.width=13.5, fig.cap=caption2}
+rgn_all_pods$cumulative_compare[[params$rgn_name]]$cumulative_chart_num + rgn_all_pods$cumulative_compare[[params$rgn_name]]$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
+```
+
+Figure \@ref(fig:pod-compare-cumulative)A shows the total cumulative excess deaths in each place of death since 20 March 2020. The chart can be used to compare the numbers of excess deaths in each place of death. This chart can be used to compare the cumulative total of excess deaths since 20 March 2020 between places of death.  
+
+Figure \@ref(fig:pod-compare-cumulative)B shows the ratio of the observed to the expected deaths in each place of death since 20 March 2020. This chart can be used to compare relative excess mortality between places of death.
+
+
+```{r pod-compare-cumulative-table}
+rgn_all_pods$cumulative_compare[[params$rgn_name]]$cumulative_table %>%
+  gt::tab_header(title = "Table 7") %>%
+  gt::opt_align_table_header(align = "left")
+```
+
+## Comparisons to other measures of excess deaths in England
+
+The Office for National Statistics also publishes a weekly report on excess deaths in England & Wales. The numbers reported by ONS are broadly in line with the overall excess death figures in this report but there are some differences as the ‘expected’ numbers in this report are not just the simple five-year average for 2015 to 2019, as used by ONS. As explained in the Methods, they are instead modelled estimates which adjust for factors such as the ageing of the population and the underlying trend in mortality rates from year to year. The ONS report also defines weeks as seven-day periods ending on a Friday. Excess deaths in this report were estimated only for weekdays, with deaths registered on a Saturday added to the preceding Friday each week.        
+
+EuroMOMO is a European mortality monitoring programme that aims to measure excess deaths related to seasonal influenza and other public health threats that uses a standardised methodology across 24 European countries. The methodology used by EuroMOMO is similar to that used by the PHE model, however, the EuroMOMO model looks at deaths by date of occurrence, and the PHE model looks at deaths by date of registration. Because there is a time lag between date of occurrence of death and date of registration, analysis of excess deaths by date of occurrence requires a delay correction, the reliability of which improves over time.  These two models produce very similar results but with small differences due to the delay correction applied by EuroMOMO.
+
+The PHE Daily GRO mortality model is used in PHE’s COVID-19 surveillance report for all-cause mortality. It uses a 5-year average to estimate expected deaths, similar to that used by the ONS but with a trend included. It looks at deaths by date of occurrence based on rapidly reported deaths from the General Register Office and uses a registration delay correction, the reliability of which improves over time. Overall, the excess deaths are similar in the COVID-19 surveillance report and this report, but may show some differences in specific weeks due to use of occurrence date compared with registration date, and in recent weeks due to the delay corrections.
