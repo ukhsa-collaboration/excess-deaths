@@ -22,13 +22,15 @@
 #'   predictions are to be made by grouped fields. Possible values are
 #'   "Deprivation_Quintile", "Ethnic_Group", "Sex", "Age_Group", "RGN09CD",
 #'   "UTLAApr19CD", "POD_out", "name_of_cause"
+#' @age_group_type either "original" or "nomis" to control for the age groups
+#'   used in the analysis
 #' @inheritParams get_baseline_deaths
 
 get_predictions <- function(model_filename, visualisation_geography = NULL,
                             from_date = as.Date("2020-03-01"), to_date = Sys.Date(), 
                             directory = Sys.getenv("PREDICTIONS_FILESHARE"),
                             ethnicity = FALSE, deprivation = NULL, facet_fields = NULL,
-                            age_filter = NULL) {
+                            age_filter = NULL, age_group_type = "original") {
 
   
   # check visualisation_geography inputs ------------------------------------
@@ -63,15 +65,13 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
   filename <- generate_file_name(model_filename = model_filename, 
                                  directory = directory, 
                                  visualisation_geography = visualisation_geography, 
-                                 facet_fields = paste(facet_fields, collapse = "_"))
+                                 facet_fields = paste(facet_fields, collapse = "_"),
+                                 age_filter = age_filter)
   if (file.exists(filename)) {
     predictions <- read.csv(filename, stringsAsFactors = FALSE)
     if (as.Date(max(predictions$date)) > Sys.Date()) return(predictions)
   }
   
-  library(lubridate)
-  library(assertr)
-  library(purrr)
   
   denominators <- get_denominators(start_year = year(from_date), 
                                    end_year = year(to_date), 
@@ -101,16 +101,20 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
   if (ethnicity == TRUE) {
     denominators <- denominators %>%
       mutate(Ethnic_Group = factor(Ethnic_Group))
-  } else {
-    if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        mutate(Deprivation_Quintile = factor(Deprivation_Quintile))
-    } else if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        aggregate_Scillies_CoL(OfficialCode, denominator)
-    }
+    
+  } 
+  
+  if (deprivation == TRUE) {
+    denominators <- denominators %>%
+      mutate(Deprivation_Quintile = factor(Deprivation_Quintile))
     
   }
+  
+  if (deprivation == FALSE & ethnicity == FALSE) {
+    denominators <- denominators %>%
+      aggregate_Scillies_CoL(OfficialCode, denominator)
+  }
+  
   denominators <- denominators %>%
       sex_change_0_1(Sex) %>%
       mutate(Age_Group = factor(Age_Group))
@@ -121,21 +125,14 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                                                 ethnicity = ethnicity, 
                                                                 deprivation = deprivation)
   
-  if (ethnicity == TRUE) {
+  if (ethnicity == TRUE | deprivation == TRUE) {
     area_codes <- utla_lkp %>%
       pull(RGN09CD) %>%
       unique()
   } else {
-    if (deprivation == TRUE) {
-      area_codes <- utla_lkp %>%
-        pull(RGN09CD) %>%
-        unique()
-    } else if (deprivation == FALSE) {
-      area_codes <- utla_lkp %>%
-        filter(!(UTLAApr19CD %in% c("E06000053", "E09000001"))) %>%
-        pull(UTLAApr19CD)
-    }
-    
+    area_codes <- utla_lkp %>%
+      filter(!(UTLAApr19CD %in% c("E06000053", "E09000001"))) %>%
+      pull(UTLAApr19CD)
   }
   
   recent_dates <- build_recent_dates(area_codes = area_codes, 
@@ -146,7 +143,8 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                      utla_lkp = utla_lkp,
                                      ethnicity = ethnicity, 
                                      deprivation = deprivation,
-                                     age_filter = age_filter)
+                                     age_filter = age_filter,
+                                     age_group_type = age_group_type)
   
   ##### BEGIN PREDICTING ######
   

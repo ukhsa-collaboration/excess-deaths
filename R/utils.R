@@ -411,11 +411,6 @@ summarise_baseline_to_higher_aggregation <- function(data) {
 #' @description retrieve a UTLA code, UTLA Name, Region code and Region Name
 #'   lookup from the Data Lake
 utla_lookup <- function() {
-  library(DBI)
-  library(odbc)
-  library(dplyr)
-  library(dbplyr)
-  library(lubridate)
   con <- dbConnect(odbc(), 
                    Driver = "SQL Server", 
                    Server = Sys.getenv("DATA_LAKE_SERVER"), 
@@ -511,7 +506,7 @@ add_prediction_intervals <- function(data, modelled_field, dispersion_parameter)
 }
 
 #' @description look up table for age in years to age group
-age_group_lkp <- function(age_filter = NULL) {
+age_group_lkp <- function(age_filter = NULL, type = "original") {
   
   if (!is.null(age_filter)) {
     ages <- convert_age_filter(age_filter)
@@ -520,22 +515,63 @@ age_group_lkp <- function(age_filter = NULL) {
                  upper_age = 200)
   }
   
-  agegroup_lkp <- tibble(Age = ages$lower_age:ages$upper_age) %>%
-    mutate(Age_Group = case_when(
-      Age < 15 ~ "0-14",
-      Age < 45 ~ "15-44",
-      Age < 65 ~ "45-64",
-      Age < 75 ~ "65-74",
-      Age < 85 ~ "75-84",
-      TRUE ~ "85+"),
-    Age_Group_PHA = case_when(
-      Age < 15 ~ "<15",
-      Age < 45 ~ "15-44",
-      Age < 65 ~ "45-64",
-      Age < 75 ~ "65-74",
-      Age < 85 ~ "75-84",
-      TRUE ~ "85+"
-    ))
+  if (type == "original") {
+    agegroup_lkp <- tibble(Age = ages$lower_age:ages$upper_age) %>%
+      mutate(Age_Group = case_when(
+        Age < 15 ~ "0-14",
+        Age < 45 ~ "15-44",
+        Age < 65 ~ "45-64",
+        Age < 75 ~ "65-74",
+        Age < 85 ~ "75-84",
+        TRUE ~ "85+"),
+        Age_Group_PHA = case_when(
+          Age < 15 ~ "<15",
+          Age < 45 ~ "15-44",
+          Age < 65 ~ "45-64",
+          Age < 75 ~ "65-74",
+          Age < 85 ~ "75-84",
+          TRUE ~ "85+"
+        ))
+  } else if (type == "five year") {
+    agegroup_lkp <- tibble(Age = ages$lower_age:ages$upper_age) %>%
+      mutate(Age_Group = case_when(
+        Age < 5 ~ "0-4",
+        Age < 10 ~ "5-9",
+        Age < 15 ~ "10-14",
+        Age < 20 ~ "15-19",
+        Age < 25 ~ "20-24",
+        Age < 30 ~ "25-29",
+        Age < 35 ~ "30-34",
+        Age < 40 ~ "35-39",
+        Age < 45 ~ "40-44",
+        Age < 50 ~ "45-49",
+        Age < 55 ~ "50-54",
+        Age < 60 ~ "55-59",
+        Age < 65 ~ "60-64",
+        Age < 70 ~ "65-69",
+        Age < 75 ~ "70-74",
+        Age < 80 ~ "75-79",
+        Age < 85 ~ "80-84",
+        Age < 90 ~ "85-89",
+        TRUE ~ "90+"))
+  } else if (type == "nomis") {
+    agegroup_lkp <- tibble(Age = ages$lower_age:ages$upper_age) %>%
+      mutate(Age_Group = case_when(
+        Age < 25 ~ "0-24",
+        Age < 50 ~ "25-49",
+        Age < 65 ~ "50-64",
+        Age < 75 ~ "65-74",
+        Age < 85 ~ "75-84",
+        TRUE ~ "85+"),
+        Age_Group_Nomis = case_when(
+          Age < 25 ~ "Age 0 to 24",
+          Age < 50 ~ "Age 25 to 49",
+          Age < 65 ~ "Age 50 to 64",
+          Age < 75 ~ "Age 65 to 74", #this doesn't exist in Nomis data
+          Age < 85 ~ "Age 75 to 84", #this doesn't exist in Nomis data
+          TRUE ~ "Age 85 and over")) #this doesn't exist in Nomis data
+  }
+  
   return(agegroup_lkp)
 }
 
@@ -592,7 +628,8 @@ adjust_last_date <- function(data, date_field, holidays) {
 #' @inheritParams get_predictions
 generate_file_name <- function(model_filename,  
                                directory = Sys.getenv("PREDICTIONS_FILESHARE"),
-                               visualisation_geography = NULL, facet_fields = "") {
+                               visualisation_geography = NULL, facet_fields = "",
+                               age_filter = NULL) {
   model_filename <- basename(model_filename)
   model_filename <- tools::file_path_sans_ext(model_filename)
   
@@ -602,6 +639,10 @@ generate_file_name <- function(model_filename,
   if (!(facet_fields == "")) model_filename <- paste(model_filename,
                                                      facet_fields,
                                                      sep = "_")
+  
+  if (!is.null(age_filter)) model_filename <- paste(model_filename,
+                                                    paste(age_filter, collapse = "_"),
+                                                    sep = "_")
   filename <- paste0(directory,
                      "/",
                      model_filename,
@@ -612,14 +653,14 @@ generate_file_name <- function(model_filename,
 #' @description ethnic group lookup table
 ethnic_groups_lookup <- function() {
   ethnic_groups <- tibble::tribble(
-    ~Ethnic_Group,                       ~Ethnic_group_data_lake,                                                                         ~Ethnicity_Broad,
-    "Asian",                       "Asian / Asian British",                                             "2-Asian or Asian British including Chinese",
-    "Black", "Black / African / Caribbean / Black British",                                                               "3-Black or Black British",
-    "Mixed",              "Mixed / Multiple ethnic groups",                                                                                "4-Mixed",
-    "Not_Stated/Not_Known/Not_Given",                    "No ethnicity information",                                                       "6-Not_Stated/Not_Known/Not_Given",
-    "Other",                      "Any other ethnic group",                                                                  "5-Other Ethnic Groups",
-    "Unknown",                    "No ethnicity information", "7-NULL-SEX in mortality does match SEX in HES or Ethnicity not in HES for search FYEAR",
-    "White",                                       "White",                                                                                "1-White"
+    ~Ethnic_Group,                       ~Ethnic_group_data_lake,                                                                         ~Ethnicity_Broad,                               ~Ethnicity_Nomis,
+    "Asian",                       "Asian / Asian British",                                             "2-Asian or Asian British including Chinese",                   "Asian/Asian British: Total",
+    "Black", "Black / African / Caribbean / Black British",                                                               "3-Black or Black British", "Black/African/Caribbean/Black British: Total",
+    "Mixed",              "Mixed / Multiple ethnic groups",                                                                                "4-Mixed",           "Mixed/multiple ethnic group: Total",
+    "Not_Stated/Not_Known/Not_Given",                    "No ethnicity information",                                                       "6-Not_Stated/Not_Known/Not_Given",                                             NA,
+    "Other",                      "Any other ethnic group",                                                                  "5-Other Ethnic Groups",                    "Other ethnic group: Total",
+    "Unknown",                    "No ethnicity information", "7-NULL-SEX in mortality does match SEX in HES or Ethnicity not in HES for search FYEAR",                                             NA,
+    "White",                                       "White",                                                                                "1-White",                                 "White: Total"
   )
   
   return(ethnic_groups)
@@ -631,7 +672,8 @@ ethnic_groups_lookup <- function() {
 #' @inheritParams create_baseline
 #' @inheritParams generate_visualisations
 #' @param utla_lkp a tibble lookup table for utla to region (see utla_lookup())
-build_recent_dates <- function(area_codes, from_date, to_date, holidays, denominators, utla_lkp, ethnicity, deprivation, age_filter = NULL) {
+build_recent_dates <- function(area_codes, from_date, to_date, holidays, denominators, utla_lkp, ethnicity, deprivation, 
+                               age_filter = NULL, age_group_type = "original") {
   utlas <- utla_lkp %>%
     filter(!(UTLAApr19CD %in% c("E06000053", "E09000001"))) %>%
     pull(UTLAApr19CD)
@@ -642,7 +684,7 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
   
   Sex <- factor(c(0, 1))
   
-  Age_Group <- age_group_lkp(age_filter = age_filter) %>%
+  Age_Group <- age_group_lkp(age_filter = age_filter, type = age_group_type) %>%
     pull(Age_Group) %>%
     unique() %>%
     factor()
@@ -653,22 +695,23 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
     filter(!(wday(date) %in% c(1, 7)),
            !(date %in% holidays)) 
   
-  if (ethnicity == TRUE) {
+  if (ethnicity == TRUE | deprivation == TRUE) {
     recent_dates <- recent_dates %>%
-      merge(y = data.frame(RGN09CD = area_codes, stringsAsFactors = FALSE)) %>%
-      merge(y = data.frame(Ethnic_Group = factor(c("Asian", "Black", "Mixed", "Other", "White"))))
-      # merge(y = data.frame(Ethnic_Group = factor(unique(ethnic_groups_lookup()$Ethnic_Group))))
-  } else {
-    if (deprivation == TRUE){
+      merge(y = data.frame(RGN09CD = area_codes, stringsAsFactors = FALSE))
+    if (ethnicity == TRUE) {
       recent_dates <- recent_dates %>%
-        merge(y = data.frame(RGN09CD = rgns, stringsAsFactors = FALSE)) %>%
-        merge(y = data.frame(Deprivation_Quintile = factor(1:5)))
-    } else if (deprivation == FALSE) {
-      recent_dates <- recent_dates %>%
-        merge(y = data.frame(UTLAApr19CD = utlas, stringsAsFactors = FALSE))
+        merge(y = data.frame(Ethnic_Group = factor(c("Asian", "Black", "Mixed", "Other", "White"))))  
     }
     
+    if (deprivation == TRUE){
+      recent_dates <- recent_dates %>%
+        merge(y = data.frame(Deprivation_Quintile = factor(1:5)))
+    } 
+  } else {
+      recent_dates <- recent_dates %>%
+        merge(y = data.frame(UTLAApr19CD = utlas, stringsAsFactors = FALSE))
   }
+  
   recent_dates <- recent_dates  %>%
     merge(y = data.frame(Sex = Sex)) %>%
     merge(y = data.frame(Age_Group = Age_Group)) %>%
@@ -677,8 +720,13 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
            years_from_20161231 = as.numeric(date - as.Date("2016-12-31")) / 365.25)
   
   if (ethnicity == TRUE) {
-    recent_dates <- recent_dates %>%
-      left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month"))
+    if (deprivation == TRUE) {
+      recent_dates <- recent_dates %>%
+        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "month"))  
+    } else {
+      recent_dates <- recent_dates %>%
+        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month"))  
+    }
   } else {
     if (deprivation == TRUE) {
       recent_dates <- recent_dates %>%
@@ -716,14 +764,26 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
   
   ## add zeros in missing fields (ie, because the month hasn't occurred in the recent_dates object)
   if (ethnicity == TRUE) {
-    expected_names <- c("date", "RGN09CD", "Ethnic_Group", "Sex", 
-                        "Age_Group", "deaths_total", 
-                        "years_from_20161231", "denominator", #"year", 
-                        "WedpreE", "ThurpreE", "TuespostE", 
-                        "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
-                        "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
-                        paste0("month", 1:12), 
-                        paste0("day", 1:5))
+    if (deprivation == TRUE) {
+      expected_names <- c("date", "RGN09CD", "Ethnic_Group", "Deprivation_Quintile", "Sex", 
+                          "Age_Group", "deaths_total", 
+                          "years_from_20161231", "denominator", #"year", 
+                          "WedpreE", "ThurpreE", "TuespostE", 
+                          "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
+                          "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
+                          paste0("month", 1:12), 
+                          paste0("day", 1:5))
+    } else {
+      expected_names <- c("date", "RGN09CD", "Ethnic_Group", "Sex", 
+                          "Age_Group", "deaths_total", 
+                          "years_from_20161231", "denominator", #"year", 
+                          "WedpreE", "ThurpreE", "TuespostE", 
+                          "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
+                          "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
+                          paste0("month", 1:12), 
+                          paste0("day", 1:5))
+      
+    }
   } else {
     if (deprivation == TRUE) {
       expected_names <- c("date", "RGN09CD", "Deprivation_Quintile", "Sex", 
@@ -862,7 +922,6 @@ transform_regions <- function(data, region_field) {
 #' @param disease_name string; the disease name used in the comparability ratios
 #'   Excel lookup table
 apply_comparability_ratios <- function(data, disease_name) {
-  library(readxl)
   age_group_expand <- age_group_lkp() %>%
     mutate(Agegroup = case_when(
       Age < 75 ~ "<75",
@@ -1034,7 +1093,7 @@ split_chart_variables <- function(field, grouping_fields) {
 
 #' @description export data ready for using in PowerBI
 export_powerbi_data <- function(data, grouping_fields, model_filename, end_date,
-                                directory = Sys.getenv("POWERBI_FILESHARE")) {
+                                directory = Sys.getenv("POWERBI_FILESHARE"), age_filter = NULL) {
   # create directory if it doesn't exist already
   dir.create(directory, showWarnings = FALSE)
   
@@ -1083,10 +1142,23 @@ export_powerbi_data <- function(data, grouping_fields, model_filename, end_date,
     dplyr::select(-weekid) %>% 
     mutate(date = date - 1)
   
+  
+  
+  if (!is.null(age_filter)) {
+    filename <- paste0(directory, "/", model_filename,
+                       "_",
+                       paste(grouping_fields_without_date, collapse = "_"),
+                       "_",
+                       paste(age_filter, collapse = "_"),
+                       ".csv")
+  } else {
+    filename <- paste0(directory, "/", model_filename,
+                       paste(grouping_fields_without_date, collapse = "_"),
+                       ".csv")
+  }
+  
   write.csv(data, 
-            paste0(directory, "/", model_filename,
-                  paste(grouping_fields_without_date, collapse = "_"),
-                  ".csv"),
+            filename,
             row.names = FALSE)
 }
 
@@ -1132,3 +1204,145 @@ wordify_ratio <- function(ratio) {
 }
 
 
+transform_nomis_ages <- function(data, age_field, LSOA_field, pop_field) {
+  keep_names <- replace(names(data), names(data) == "C_AGE_NAME", "Age_Group")
+  
+  old_age <- data %>% 
+    filter({{ age_field }} == "Age 65 and over")
+  
+  data <- data %>% 
+      filter({{ age_field }} != "Age 65 and over")
+  
+  age_gp_lkp_young <- age_group_lkp(type = "nomis") %>% 
+    distinct(Age_Group_Nomis, Age_Group)
+  
+  age_gp_lkp_older <- age_group_lkp(type = "original")
+  
+  pops_url <- "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/populationandmigration/populationestimates/adhocs/008781populationdenominatorsbybroadethnicgroupandforwhitebritishlocalauthoritiesinenglandandwales2011to2017/localdenominators2019.xls"
+  GET(pops_url, write_disk(tf <- tempfile(fileext = ".xls")))
+  
+  lad_proportions <- readxl::read_excel(tf,
+                                        sheet = "2019") %>% 
+    filter(age >= 65,
+           grepl("^E", lad2014_code)) %>% 
+    left_join(age_gp_lkp_older, by = c("age" = "Age")) %>% 
+    group_by(lad2014_code, Age_Group, sex) %>% 
+    summarise(White = sum(White),
+              Mixed = sum(Mixed),
+              Asian = sum(Asian),
+              Black = sum(Black),
+              Other = sum(Other),
+              .groups = "drop") %>% 
+    dplyr::select(lad2014_code, Age_Group, Sex = sex, White, Mixed, Asian, Black, Other) %>% 
+    pivot_longer(cols = c(White, Mixed, Asian, Black, Other),
+                 names_to = "Ethnic_Group",
+                 values_to = "denominator") %>% 
+    group_by(lad2014_code, Ethnic_Group, Sex) %>% 
+    add_tally(denominator) %>% 
+    mutate(proportions = case_when(
+                          n == 0 ~ 0,
+                          TRUE ~ denominator / n)) %>% 
+    dplyr::select(-c(denominator, n))
+    
+  # get lookup from LSOA to LAD2014
+  con <- dbConnect(odbc(), 
+                   Driver = "SQL Server", 
+                   Server = Sys.getenv("DATA_LAKE_SERVER"), 
+                   Database = Sys.getenv("POPULATIONS_DATABASE"), 
+                   Trusted_Connection = "True",
+                   timeout = 60)
+  
+  area_lkup <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("LSOA_DEMOGRAPHICS_TABLE"))) %>% 
+    dplyr::select(GEOGRAPHY_CODE = LSOA11CD, LTLA13CD) %>% 
+    collect()
+  
+  dbDisconnect(con)
+  
+  # calculate older age bands using lad proportions
+  old_age <- old_age %>% 
+    left_join(area_lkup, by = intersect(names(.), names(area_lkup))) %>% 
+    left_join(lad_proportions, by = c("LTLA13CD" = "lad2014_code", "C_SEX" = "Sex", "Ethnic_Group")) %>% 
+    mutate({{ pop_field }} := {{ pop_field }} * proportions) %>% 
+    dplyr::select(all_of(keep_names))
+  
+  data <- data %>% 
+    left_join(age_gp_lkp_young, by = c("C_AGE_NAME" = "Age_Group_Nomis")) %>% 
+    dplyr::select(all_of(keep_names)) %>% 
+    bind_rows(old_age)
+  
+  return(data)
+  
+}
+
+
+cabinet_office_data_feed <- function() {
+  folder_path <- Sys.getenv("POWERBI_FILESHARE")
+  
+  ucods <- read.csv(paste0(folder_path, "/name_of_cause.csv")) %>% 
+    mutate(underlying_or_mention = "underlying")
+  
+  dm <- read.csv(paste0(folder_path, "/glm_all_utlas_dm_20200522.csv")) %>% 
+    mutate(name_of_cause = "diabetes mellitus",
+           underlying_or_mention = "mention")
+  ari <- read.csv(paste0(folder_path, "/glm_all_utlas_ari_mentions_20200522.csv")) %>% 
+    mutate(name_of_cause = "acute respiratory infections",
+           underlying_or_mention = "mention")
+  dm <- read.csv(paste0(folder_path, "/glm_all_utlas_dementia_mentions_20200522.csv")) %>% 
+    mutate(name_of_cause = "dementia",
+           underlying_or_mention = "mention")
+  
+  final <- bind_rows(ucods,
+                     dm, 
+                     ari,
+                     dm) %>% 
+    mutate(name_of_cause = tools::toTitleCase(name_of_cause)) %>% 
+    rename(week_ending = date) %>% 
+    dplyr::relocate(underlying_or_mention) %>% 
+    filter(days_in_week == 7) %>% 
+    dplyr::select(!c(covid, days_in_week))
+  
+  filepath <- paste0(folder_path, "/causes_of_death_for_cabinet_office.csv")
+  write.csv(final,
+            filepath,
+            row.names = FALSE)
+  
+  return(filepath)
+}
+
+collate_powerbi_files <- function(remove_expected_registered = FALSE) {
+  folder_path <- Sys.getenv("POWERBI_FILESHARE")
+  
+  file_references <- read.csv("data/powerbi_references.csv") %>% 
+    mutate(powerbi_file = paste0(folder_path, "/", powerbi_file, ".csv")) %>% 
+    tibble::deframe()
+  
+  collated_output <- lapply(file_references, read.csv) %>% 
+    bind_rows(.id = "Chart_Name") %>% 
+    filter(days_in_week == 7) %>% 
+    mutate(excess_deaths = round_correct(registered - expected, 0),
+           ratio = round_correct(registered / expected, 2),
+           name_of_cause = case_when(
+             grepl("mentions", Chart_Name) ~ Chart_Name,
+             TRUE ~ name_of_cause),
+           Chart_Name = case_when(
+             grepl("mentions", Chart_Name) ~ "Mention of cause of death",
+             TRUE ~ Chart_Name)) %>% 
+    dplyr::select(!c(days_in_week)) %>% 
+    rename(Place_of_Death = POD_out,
+           Week_End = date,
+           Mention_of_Covid = covid,
+           Cause_Name = name_of_cause,
+           Region_Code = RGN09CD)
+  
+  if (remove_expected_registered == TRUE) {
+    collated_output <- collated_output %>% 
+      dplyr::select(!c(registered, expected))
+  }
+    
+  filepath <- paste0(folder_path, "/weekly_chart_data.csv")
+  write.csv(collated_output,
+            filepath,
+            row.names = FALSE)
+  return(filepath)
+  
+}

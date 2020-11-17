@@ -1,0 +1,13 @@
+reference,powerbi_file
+England,202000916_eth_dep
+Age-Sex,202000916_eth_dep_Age_Group_Sex
+Ethnicity-Sex,202000916_eth_dep_Ethnic_Group_Sex
+Ethnicity-Deprivation (under 75),202000916_eth_dep_Deprivation_Quintile_Ethnic_Group_0_74
+Deprivation (under 75),202000916_eth_dep_Deprivation_Quintile_0_74
+Deprivation (over 75),202000916_eth_dep_Deprivation_Quintile_75_NA
+Region,202000916_eth_dep_RGN09CD
+Underlying cause of death,name_of_cause
+Dementia mentions,glm_all_utlas_dementia_mentions_20200522
+Acute Respiratory Infections mentions,glm_all_utlas_ari_mentions_20200522
+Diabetes mentions,glm_all_utlas_dm_20200522
+Place of death,POD_out

@@ -1,8 +1,6 @@
 pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, ethnicity, 
                                        deprivation, deaths_reallocated,
                                        all_pod = FALSE, all_ucod = FALSE) {
-  library(assertr)
-  library(dplyr)
   
   ### data checks ###
   
@@ -21,22 +19,39 @@ pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, ethnicit
     all_age_groups
   
   if (ethnicity == TRUE) {
-    expected_records <- expected_records *
-      length(unique(deaths_data$Ethnic_Group)) *
-      length(unique(utla_lkp$RGN09CD))
+    if (deprivation == FALSE) {
+      expected_records <- expected_records *
+        length(unique(deaths_data$Ethnic_Group)) *
+        length(unique(utla_lkp$RGN09CD))
+      
+      deaths_data %>%
+        chain_start() %>%
+        verify(has_all_names("RGN09CD", "Ethnic_Group", "Sex", "Age_Group", "Reg_Date", "deaths_total")) %>%
+        verify(nrow(.) == expected_records) %>%
+        assert_rows(col_concat, is_uniq, RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
+        assert(not_na, everything()) %>%
+        assert(within_bounds(0, Inf), deaths_total) %>%
+        chain_end()
+    } else if (deprivation == TRUE) {
+      expected_records <- expected_records *
+        length(unique(deaths_data$Ethnic_Group)) *
+        length(unique(utla_lkp$RGN09CD)) *
+        length(1:5) #deprivation
+      
+      deaths_data %>%
+        chain_start() %>%
+        verify(has_all_names("RGN09CD", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "Reg_Date", "deaths_total")) %>%
+        verify(nrow(.) == expected_records) %>%
+        assert_rows(col_concat, is_uniq, RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, Reg_Date) %>%
+        assert(not_na, everything()) %>%
+        assert(within_bounds(0, Inf), deaths_total) %>%
+        chain_end()
+    }
     
-    deaths_data %>%
-      chain_start() %>%
-      verify(has_all_names("RGN09CD", "Ethnic_Group", "Sex", "Age_Group", "Reg_Date", "deaths_total")) %>%
-      verify(nrow(.) == expected_records) %>%
-      assert_rows(col_concat, is_uniq, RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
-      assert(not_na, everything()) %>%
-      assert(within_bounds(0, Inf), deaths_total) %>%
-      chain_end()
   } else {
     if (deprivation == TRUE) {
       expected_records <- expected_records * 
-        length(1:5) *
+        length(1:5) * #deprivation
         length(unique(utla_lkp$RGN09CD))
       
       deaths_data %>%
@@ -93,8 +108,6 @@ pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, ethnicit
           chain_end()
       }
       
-      
-      
     }
     
   }
@@ -128,9 +141,7 @@ pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, ethnicit
 post_processed_death_checks <- function(deaths_data, holidays, total_deaths, 
                                         total_deaths_around_hols_weekends = NULL, ethnicity, 
                                         deaths_reallocated, deaths_field, deprivation, days_reallocated = deaths_reallocated) {
-  library(assertr)
-  library(dplyr)
-  
+
   if (deaths_reallocated == TRUE) {
     
     if (days_reallocated == TRUE) {
@@ -179,25 +190,43 @@ post_processed_death_checks <- function(deaths_data, holidays, total_deaths,
 }
 
 pre_processed_denominators_checks <- function(denominators, start_year, end_year, utla_lkp, ethnicity, deprivation, age_filter) {
-  library(assertr)
-  library(dplyr)
-
+  
   if (ethnicity == TRUE) {
-    expected_records_denominators <- length(start_year:end_year) *
-      12 * #months
-      2 * #sex
-      length(unique(age_group_lkp(age_filter = age_filter)$Age_Group)) *
-      length(unique(utla_lkp$RGN09CD)) *
-      length(unique(denominators$Ethnic_Group))
+    if (deprivation == FALSE) {
+      expected_records_denominators <- length(start_year:end_year) *
+        12 * #months
+        2 * #sex
+        length(unique(age_group_lkp(age_filter = age_filter)$Age_Group)) *
+        length(unique(utla_lkp$RGN09CD)) *
+        length(unique(denominators$Ethnic_Group))
+      
+      denominators %>%
+        chain_start() %>%
+        verify(has_all_names("OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month", "denominator")) %>%
+        verify(nrow(.) == expected_records_denominators) %>%
+        assert_rows(col_concat, is_uniq, OfficialCode, Ethnic_Group, Sex, Age_Group, month) %>%
+        assert(not_na, everything()) %>%
+        assert(within_bounds(0, Inf), denominator) %>%
+        chain_end()
+    } else if (deprivation == TRUE) {
+      expected_records_denominators <- length(start_year:end_year) *
+        12 * #months
+        2 * #sex
+        length(unique(age_group_lkp(age_filter = age_filter)$Age_Group)) *
+        length(unique(utla_lkp$RGN09CD)) *
+        length(unique(denominators$Ethnic_Group)) *
+        length(1:5) #deprivation
+      
+      denominators %>%
+        chain_start() %>%
+        verify(has_all_names("OfficialCode", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "month", "denominator")) %>%
+        verify(nrow(.) == expected_records_denominators) %>%
+        assert_rows(col_concat, is_uniq, OfficialCode, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, month) %>%
+        assert(not_na, everything()) %>%
+        assert(within_bounds(0, Inf), denominator) %>%
+        chain_end()
+    }
     
-    denominators %>%
-      chain_start() %>%
-      verify(has_all_names("OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month", "denominator")) %>%
-      verify(nrow(.) == expected_records_denominators) %>%
-      assert_rows(col_concat, is_uniq, OfficialCode, Ethnic_Group, Sex, Age_Group, month) %>%
-      assert(not_na, everything()) %>%
-      assert(within_bounds(0, Inf), denominator) %>%
-      chain_end()
   } else {
     if (deprivation == TRUE) {
       expected_records_denominators <- length(start_year:end_year) *
@@ -240,8 +269,6 @@ pre_processed_denominators_checks <- function(denominators, start_year, end_year
 }
 
 post_processed_denominators_checks <- function(denominators, total_denominators, ethnicity, deprivation) {
-  library(assertr)
-  library(dplyr)
   
   denominators %>%
     verify(round_correct(sum(denominator), 8) == round_correct(total_denominators, 8)) %>%

@@ -95,3 +95,39 @@ brewer_phe <- function (theme = "phe", n = Inf, names = FALSE) {
   }
   return(brewer_phe)
 }
+
+
+function (theme = "phe", n = Inf, names = FALSE) 
+{
+  colour_key <- list(phe = c("#822433", "#00B092", "#002776", 
+                             "#DAD7CB", "#A4AEB5", "#E9994A", "#EAAB00", "#00A551", 
+                             "#8CB8C6", "#00549F", "#532D6D", "#C51A4A"))
+  brewer_names <- list(phe = c("PHEred", "teal", "navy", "mushroom", 
+                               "coolgrey", "peach", "yellow", "grass", "sky", "moonlight", 
+                               "plum", "rose"))
+  if (!(theme %in% names(colour_key))) {
+    stop("name not in available pre-loaded palettes")
+  }
+  brewer_phe <- colour_key[[theme]]
+  if (names == TRUE) {
+    brewer_names <- brewer_names[[theme]]
+    names(brewer_phe) <- brewer_names
+  }
+  if (length(n) > 1) 
+    stop("n must have length of 1")
+  if (n == Inf) {
+    brewer_phe <- brewer_phe
+  }
+  else if (n > length(brewer_phe)) {
+    warning(paste("warning,", n, "colours requested but only", 
+                  length(brewer_phe), "available.", length(brewer_phe), 
+                  "colours returned."))
+  }
+  else if (n < 1) {
+    stop("n must be positive")
+  }
+  else {
+    brewer_phe <- brewer_phe[1:n]
+  }
+  return(brewer_phe)
+}

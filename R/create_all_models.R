@@ -1,10 +1,23 @@
 ## GET utility functions
+source("R/libraries.R")
 source("R/utils.R")
 source("R/function_deaths_data.R")
 source("R/function_monthly_populations.R")
 source("R/function_modelling.R")
 source("tests/test-assertr.R")
 # memory.limit(32698)
+
+eth_dep_denominators <- get_denominators(start_year = 2015,
+                                         end_year = 2019,
+                                         ethnicity = TRUE,
+                                         deprivation = TRUE)
+# debug(create_baseline)
+eth_dep_model <- create_baseline(model_filename = "202000916_eth_dep",
+                                 denominators = eth_dep_denominators,
+                                 ethnicity = TRUE,
+                                 deprivation = TRUE,
+                                 include_2019 = TRUE,
+                                 include_ethnicity_uplift = TRUE)
 
 ethnicity_denominators <- get_denominators(start_year = 2015,
                                            end_year = 2019,
@@ -57,26 +70,6 @@ cerebrovascular_model <- create_baseline(model_filename = "20200626_cerebrovascu
                                          include_2019 = TRUE,
                                          disease_name = "Stroke")
 
-# # Other circulatory
-# other_circulatory_codes <- cause_code_lookup(table_output = TRUE) %>% 
-#   filter(name_of_cause == "other circulatory diseases") %>% 
-#   pull(ICD_codes)
-# other_circulatory_model <- create_baseline(model_filename = "20200626_other_circulatory", 
-#                                            ucods  = other_circulatory_codes, 
-#                                            denominators = denominators,
-#                                            include_2019 = TRUE,
-#                                            disease_name = "Other circulatory")
-# 
-# # Cancer
-# cancer_codes <- cause_code_lookup(table_output = TRUE) %>% 
-#   filter(name_of_cause == "cancer") %>% 
-#   pull(ICD_codes)
-# cancer_model <- create_baseline(model_filename = "20200626_cancer", 
-#                                 ucods = cancer_codes,
-#                                 denominators = denominators,
-#                                 include_2019 = TRUE,
-#                                 disease_name = "Cancer")
-
 # Acute respiratory infections
 ari_codes <- cause_code_lookup(table_output = TRUE) %>% 
   filter(name_of_cause == "acute respiratory infections") %>% 
@@ -107,15 +100,6 @@ other_respiratory_model <- create_baseline(model_filename = "20200626_other_resp
                                            include_2019 = TRUE,
                                            disease_name = "Other respiratory")
 
-# dementia_codes <- cause_code_lookup(table_output = TRUE) %>% 
-#   filter(name_of_cause == "dementia and Alzheimer's") %>% 
-#   pull(ICD_codes)
-# dementia_model <- create_baseline(model_filename = "20200626_dementia",
-#                                   ucods = dementia_codes,
-#                                   denominators = denominators,
-#                                   include_2019 = TRUE,
-#                                   disease_name = "Dementia/Alzheimers")
-
 urinary_system_codes <- cause_code_lookup(table_output = TRUE) %>% 
   filter(name_of_cause == "diseases of the urinary system") %>% 
   pull(ICD_codes)
@@ -142,15 +126,6 @@ parkinsons_model <- create_baseline(model_filename = "20200626_parkinsons",
                                     denominators = denominators,
                                     include_2019 = TRUE,
                                     disease_name = "Parkinsons")
-
-# all_other_codes <- cause_code_lookup(table_output = TRUE) %>% 
-#   filter(name_of_cause == "All other causes (excl. COVID-19)") %>% 
-#   pull(ICD_codes)
-# all_other_model <- create_baseline(model_filename = "20200626_all_other",
-#                                    ucods = all_other_codes,
-#                                    denominators = denominators,
-#                                    include_2019 = TRUE,
-#                                    disease_name = "Other (whole list)")
 
 dementia_mentions_model <- create_baseline(model_filename = "glm_all_utlas_dementia_mentions_20200522",
                                            cod = dementia_codes,

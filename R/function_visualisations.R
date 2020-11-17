@@ -29,7 +29,8 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
                                     cause_name = "all cause",
                                     caption = "", include_covid_ribbon = FALSE, ethnicity = FALSE, facet_fields = NULL,
                                     end_date = Sys.Date(), show_inset = FALSE, split_chart = NULL,
-                                    subtitle = "", axis_title = "", include_totals = FALSE, age_filter = NULL) {
+                                    subtitle = "", axis_title = "", include_totals = FALSE, age_filter = NULL,
+                                    age_group_type = "original") {
   
 
   # check visualisation_geography inputs ------------------------------------
@@ -57,18 +58,6 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
   caption <- setNames(paste(caption, data_source, sep = "\n"),
                       nm = names(caption))
   
-  library(dplyr)
-  library(ggplot2)
-  library(purrr)
-  library(stringr)
-  library(gt)
-  
-  # if (any(cause_name != "all cause") &
-  #     is.null(cod)) {
-  #   ucods <- cause_code_lookup(cause_name)
-  #   cause_name <- paste(cause_name, collapse = " including ") # this is currently only intended for use as "all other causes including COVID-19"
-  # }
-  # 
   predictions <- lapply(model_filename,
                         get_predictions, 
                         visualisation_geography = visualisation_geography,
@@ -78,7 +67,8 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
                         ethnicity = ethnicity, 
                         deprivation = deprivation, 
                         facet_fields = facet_fields,
-                        age_filter = age_filter)
+                        age_filter = age_filter,
+                        age_group_type = age_group_type)
   if (all_pod == TRUE) {
     predictions <- map_df(predictions, ~as.data.frame(.x), .id = "POD_out")
   } else if (all_ucod == TRUE) {
@@ -154,29 +144,55 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
   utla_lkp <- utla_lookup()
   
   if (ethnicity == TRUE) {
-    ethnicity_baseline <- get_denominators(ethnicity = TRUE) %>%
-      rename(RGN09CD = OfficialCode,
-             deaths_total = denominator) %>%
-      dplyr::select(-month)
-    ethnicity_proportions <- calculate_ethnicity_proportions(data = ethnicity_baseline,
-                                                             ethnicity_field = Ethnic_Group, 
-                                                             region_field = RGN09CD, 
-                                                             age_field = Age_Group, 
-                                                             sex_field = Sex, 
-                                                             deaths_field = deaths_total)
+    if (deprivation == TRUE) {
+      ethnicity_deprivation_baseline <- get_denominators(ethnicity = TRUE, 
+                                                         deprivation = TRUE) %>%
+        rename(RGN09CD = OfficialCode,
+               deaths_total = denominator) %>%
+        dplyr::select(-month)
+      
+      ethnicity_proportions <- calculate_ethnicity_proportions(data = ethnicity_deprivation_baseline,
+                                                               ethnicity_field = Ethnic_Group,
+                                                               region_field = RGN09CD,
+                                                               age_field = Age_Group,
+                                                               sex_field = Sex,
+                                                               deaths_field = deaths_total,
+                                                               include_deprivation = TRUE)
+      
+      registered_deaths <- registered_deaths %>%
+        left_join(utla_lkp, by = "UTLAApr19CD") %>%
+        group_by(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, Reg_Date) %>%
+        summarise(deaths_total = sum(deaths_total), .groups = "drop")
+      
+      covid_deaths <- covid_deaths %>%
+        left_join(utla_lkp, by = "UTLAApr19CD") %>%
+        group_by(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, Reg_Date) %>%
+        summarise(deaths_total = sum(deaths_total), .groups = "drop")
+      
+    } else {
+      ethnicity_baseline <- get_denominators(ethnicity = TRUE) %>%
+        rename(RGN09CD = OfficialCode,
+               deaths_total = denominator) %>%
+        dplyr::select(-month)
+      ethnicity_proportions <- calculate_ethnicity_proportions(data = ethnicity_baseline,
+                                                               ethnicity_field = Ethnic_Group, 
+                                                               region_field = RGN09CD, 
+                                                               age_field = Age_Group, 
+                                                               sex_field = Sex, 
+                                                               deaths_field = deaths_total)
+      
+      
+      registered_deaths <- registered_deaths %>%
+        left_join(utla_lkp, by = "UTLAApr19CD") %>%
+        group_by(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
+        summarise(deaths_total = sum(deaths_total), .groups = "drop")
+      
+      covid_deaths <- covid_deaths %>%
+        left_join(utla_lkp, by = "UTLAApr19CD") %>%
+        group_by(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
+        summarise(deaths_total = sum(deaths_total), .groups = "drop")
+    }
     
-    
-    registered_deaths <- registered_deaths %>%
-      left_join(utla_lkp, by = "UTLAApr19CD") %>%
-      group_by(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
-      summarise(deaths_total = sum(deaths_total)) %>%
-      ungroup()
-    
-    covid_deaths <- covid_deaths %>%
-      left_join(utla_lkp, by = "UTLAApr19CD") %>%
-      group_by(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
-      summarise(deaths_total = sum(deaths_total)) %>%
-      ungroup()
     
   } else {
     if (deprivation == TRUE) {
@@ -184,14 +200,12 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
       registered_deaths <- registered_deaths %>%
         left_join(utla_lkp, by = "UTLAApr19CD") %>%
         group_by(RGN09CD, Deprivation_Quintile, Sex, Age_Group, Reg_Date) %>%
-        summarise(deaths_total = sum(deaths_total)) %>%
-        ungroup()
+        summarise(deaths_total = sum(deaths_total), .groups = "drop")
       
       covid_deaths <- covid_deaths %>%
         left_join(utla_lkp, by = "UTLAApr19CD") %>%
         group_by(RGN09CD, Deprivation_Quintile, Sex, Age_Group, Reg_Date) %>%
-        summarise(deaths_total = sum(deaths_total)) %>%
-        ungroup()
+        summarise(deaths_total = sum(deaths_total), .groups = "drop")
       
     }
   }
@@ -215,7 +229,7 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
                                                    all_pod = all_pod,
                                                    all_ucod = all_ucod)
   
-  age_groups <- age_group_lkp() %>%
+  age_groups <- age_group_lkp(type = age_group_type) %>%
     pull(Age_Group) %>%
     unique()
   
@@ -223,25 +237,50 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
   
   ### Preprocess registered deaths
   if (ethnicity == TRUE) {
-    registered_deaths <- registered_deaths %>%
-      arrange(RGN09CD, Ethnic_Group, Sex, Age_Group) %>%
-      ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
-                                      ethnicity_field = Ethnic_Group, 
-                                      deaths_field = deaths_total, 
-                                      region_field = RGN09CD, 
-                                      age_field = Age_Group,  
-                                      sex_field = Sex, 
-                                      date_field = Reg_Date) %>%
-      sex_change_0_1(Sex) %>%
-      weekends_to_nearest_work_day(date_field = Reg_Date, 
-                                   agg_field = deaths_total) %>%
-      bank_hols_to_nearest_work_day(bank_holidays = holidays, 
-                                    date_field = Reg_Date, 
-                                    agg_field = deaths_total) %>%
-      rename(date = Reg_Date,
-             registered_count = deaths_total) %>%
-      mutate(Age_Group = factor(Age_Group),
-             Ethnic_Group = factor(Ethnic_Group))
+    if (deprivation == TRUE) {
+      registered_deaths <- registered_deaths %>%
+        arrange(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group) %>%
+        ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
+                                        ethnicity_field = Ethnic_Group, 
+                                        deaths_field = deaths_total, 
+                                        region_field = RGN09CD, 
+                                        age_field = Age_Group,  
+                                        sex_field = Sex, 
+                                        date_field = Reg_Date,
+                                        include_deprivation = TRUE) %>%
+        sex_change_0_1(Sex) %>%
+        weekends_to_nearest_work_day(date_field = Reg_Date, 
+                                     agg_field = deaths_total) %>%
+        bank_hols_to_nearest_work_day(bank_holidays = holidays, 
+                                      date_field = Reg_Date, 
+                                      agg_field = deaths_total) %>%
+        rename(date = Reg_Date,
+               registered_count = deaths_total) %>%
+        mutate(Age_Group = factor(Age_Group),
+               Ethnic_Group = factor(Ethnic_Group),
+               Deprivation_Quintile = factor(Deprivation_Quintile))
+    } else {
+      registered_deaths <- registered_deaths %>%
+        arrange(RGN09CD, Ethnic_Group, Sex, Age_Group) %>%
+        ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
+                                        ethnicity_field = Ethnic_Group, 
+                                        deaths_field = deaths_total, 
+                                        region_field = RGN09CD, 
+                                        age_field = Age_Group,  
+                                        sex_field = Sex, 
+                                        date_field = Reg_Date) %>%
+        sex_change_0_1(Sex) %>%
+        weekends_to_nearest_work_day(date_field = Reg_Date, 
+                                     agg_field = deaths_total) %>%
+        bank_hols_to_nearest_work_day(bank_holidays = holidays, 
+                                      date_field = Reg_Date, 
+                                      agg_field = deaths_total) %>%
+        rename(date = Reg_Date,
+               registered_count = deaths_total) %>%
+        mutate(Age_Group = factor(Age_Group),
+               Ethnic_Group = factor(Ethnic_Group))
+    }
+    
   } else {
     if (deprivation  == TRUE) {
       registered_deaths <- registered_deaths %>%
@@ -288,24 +327,48 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
   
   ### Preprocess covid deaths
   if (ethnicity == TRUE) {
-    covid_deaths <- covid_deaths %>%
-      arrange(RGN09CD, Ethnic_Group, Sex, Age_Group) %>%
-      ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
-                                      ethnicity_field = Ethnic_Group, 
-                                      deaths_field = deaths_total, 
-                                      region_field = RGN09CD, 
-                                      age_field = Age_Group,  
-                                      sex_field = Sex, 
-                                      date_field = Reg_Date) %>%
-      sex_change_0_1(Sex) %>%
-      weekends_to_nearest_work_day(date_field = Reg_Date, 
-                                   agg_field = deaths_total) %>%
-      bank_hols_to_nearest_work_day(bank_holidays = holidays, 
-                                    date_field = Reg_Date, 
-                                    agg_field = deaths_total) %>%
-      rename(date = Reg_Date) %>%
-      mutate(Age_Group = factor(Age_Group),
-             Ethnic_Group = factor(Ethnic_Group))
+    if (deprivation == TRUE) {
+      covid_deaths <- covid_deaths %>%
+        arrange(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group) %>%
+        ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
+                                        ethnicity_field = Ethnic_Group, 
+                                        deaths_field = deaths_total, 
+                                        region_field = RGN09CD, 
+                                        age_field = Age_Group,  
+                                        sex_field = Sex, 
+                                        date_field = Reg_Date,
+                                        include_deprivation = TRUE) %>%
+        sex_change_0_1(Sex) %>%
+        weekends_to_nearest_work_day(date_field = Reg_Date, 
+                                     agg_field = deaths_total) %>%
+        bank_hols_to_nearest_work_day(bank_holidays = holidays, 
+                                      date_field = Reg_Date, 
+                                      agg_field = deaths_total) %>%
+        rename(date = Reg_Date) %>%
+        mutate(Age_Group = factor(Age_Group),
+               Ethnic_Group = factor(Ethnic_Group),
+               Deprivation_Quintile = factor(Deprivation_Quintile))
+    } else {
+      covid_deaths <- covid_deaths %>%
+        arrange(RGN09CD, Ethnic_Group, Sex, Age_Group) %>%
+        ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
+                                        ethnicity_field = Ethnic_Group, 
+                                        deaths_field = deaths_total, 
+                                        region_field = RGN09CD, 
+                                        age_field = Age_Group,  
+                                        sex_field = Sex, 
+                                        date_field = Reg_Date) %>%
+        sex_change_0_1(Sex) %>%
+        weekends_to_nearest_work_day(date_field = Reg_Date, 
+                                     agg_field = deaths_total) %>%
+        bank_hols_to_nearest_work_day(bank_holidays = holidays, 
+                                      date_field = Reg_Date, 
+                                      agg_field = deaths_total) %>%
+        rename(date = Reg_Date) %>%
+        mutate(Age_Group = factor(Age_Group),
+               Ethnic_Group = factor(Ethnic_Group))
+    }
+    
   } else {
     if (deprivation == TRUE) {
       covid_deaths <- covid_deaths %>%
@@ -392,12 +455,12 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
   # chart_data is full predications and registereds by UTLA age and sex
   chart_data <- predictions
   
-  if (deprivation == TRUE) {
+  if ("Deprivation_Quintile" %in% names(chart_data)) {
     chart_data <- chart_data %>% 
       mutate(Deprivation_Quintile = factor(Deprivation_Quintile))
   }
   
-  if (ethnicity == TRUE) {
+  if ("Ethnic_Group" %in% names(chart_data)) {
     chart_data <- chart_data %>% 
       mutate(Ethnic_Group = factor(Ethnic_Group))
     
@@ -426,12 +489,12 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
     
   }
   
-  if (deprivation == TRUE) {
+  if ("Deprivation_Quintile" %in% names(chart_data)) {
     chart_data <- chart_data %>% 
       transform_deprivation_groups(Deprivation_Quintile)
   }
     
-  if (ethnicity == TRUE) {
+  if ("Ethnic_Group" %in% names(chart_data)) {
     chart_data <- chart_data %>% 
       transform_ethnic_groups(Ethnic_Group, ethnic_groups, apply_labels = FALSE)
     
@@ -550,7 +613,8 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
   export_powerbi_data(data = chart_data, 
                       grouping_fields = grouping_fields,
                       model_filename = gsub("model_outputs/", "", gsub("\\.rds", "", model_filename)), 
-                      end_date = end_date + 1)
+                      end_date = end_date + 1,
+                      age_filter = age_filter)
   
   for (area in unique(chart_data$area_name)) {
     chart_data_filtered <- chart_data %>% 
@@ -705,7 +769,7 @@ generate_visualisations <- function(model_filename, visualisation_geography = "e
       names(weekly_chart_simple[[area]]) <- splitting_items
       
       final_cumulative[[area]] <- splitting_items %>%
-        lapply(function(x) cumulative_compare(death_data = chart_data_filtered[chart_data_filtered$Sex == x, ],
+        lapply(function(x) cumulative_compare(death_data = chart_data_filtered[chart_data_filtered[[split_chart]] == x, ],
                                               area_name = area,
                                               date_field = date, 
                                               model_field = modelled_deaths_zeros, 

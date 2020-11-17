@@ -42,7 +42,7 @@
 get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = NULL,
                                 pod = NULL, deprivation = FALSE, ethnicity = FALSE, 
                                 include_2019 = FALSE, include_ethnicity_uplift = FALSE, 
-                                age_filter = NULL) {
+                                age_filter = NULL, age_group_type = "original") {
 
   # check pod
   if (!is.null(pod)) {
@@ -51,92 +51,66 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
     }
   }
   
-  agegroup_lkp <- age_group_lkp(age_filter = age_filter)
+  if ((deprivation == TRUE & ethnicity == TRUE) |
+      age_group_type == "nomis") {
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "nomis")  
+  } else {
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "original")
+  }
+  
   
   ## ETHNICITY CURRENTLY PROVIDED IN A FILE SO FOLLOWING CODE SUPERCEDES FUTURE ETHNICITY CODING FOR NOW ###
   if (ethnicity == TRUE) {
-    library(readxl)
-    filepath <- Sys.getenv("ETHNICITY_BASELINE_DEATHS")
-    lower_geogs_deaths_table <- read_excel(filepath,
-                                           sheet = "Deaths_byRegionBroadEthnicgroup")
-    
     utla_lkp <- utla_lookup()
     
     rgn_lkp <- utla_lkp %>% 
       distinct(RGN09NM, RGN09CD)
     
-    if (include_2019 == TRUE) {
-      filepath_2019 <- Sys.getenv("ETHNICITY_BASELINE_DEATHS_2019")
-      lower_geogs_deaths_table_2019 <- read_excel(filepath_2019,
-                                                  sheet = "Deaths_byRegionBroadEthnicgroup",
-                                                  range = "A2:F52676") %>% 
-        left_join(rgn_lkp, by = c("Region" = "RGN09CD")) %>% 
-        dplyr::select(Reg_Date, Region = RGN09NM, Age_group, Sex, Ethnicity_Broad, Deaths_total)
-      
-      lower_geogs_deaths_table <- bind_rows(lower_geogs_deaths_table,
-                                            lower_geogs_deaths_table_2019)
-      
-      end_date <- as.Date("2019-12-31")
-    } else {
-      end_date <- as.Date("2018-12-31")
-    }
-    
     ethnic_groups <- ethnic_groups_lookup() %>%
       dplyr::select(Ethnic_Group, Ethnicity_Broad) %>%
       unique()
-    lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
-      mutate(Reg_Date = as.Date(as.character(Reg_Date), format = "%Y%m%d"),
-             Sex = as.integer(Sex),
-             Region = case_when(
-               Region == "Yorkshire and the Humber" ~ "Yorkshire and The Humber",
-               TRUE ~ Region
-             ),
-             Age_group = case_when(
-               Age_group == "<15" ~ "0-14",
-               TRUE ~ Age_group
-             )) %>%
-      left_join(ethnic_groups, by = "Ethnicity_Broad") %>%
-      filter(Sex %in% c(1, 2),
-             year(Reg_Date) >= 2015) %>%
-      left_join(rgn_lkp, by = c("Region" = "RGN09NM")) %>% 
-      dplyr::select(RGN09CD, Ethnic_Group, Reg_Date,
-                    Age_Group = Age_group, Sex,
-                    deaths_total = Deaths_total) %>%
-      complete(RGN09CD = unique(rgn_lkp$RGN09CD),
-               Ethnic_Group = ethnic_groups$Ethnic_Group,
-               Reg_Date = seq.Date(from = as.Date("2015-01-01"),
-                                   to = end_date,
-                                   by = "days"),
-               Age_Group = unique(agegroup_lkp$Age_Group),
-               Sex,
-               fill = list(deaths_total = 0)) %>%
-      arrange(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date)
     
-    if (include_ethnicity_uplift == TRUE) {
-      daily_death_totals <- get_baseline_deaths(include_2019 = TRUE) %>% 
-        left_join(utla_lkp, by = "UTLAApr19CD") %>% 
-        group_by(RGN09CD, Reg_Date, Age_Group, Sex) %>% 
-        summarise(deaths_total = sum(deaths_total), .groups = "keep") %>% 
-        ungroup()
+    if (deprivation == FALSE) {
+      filepath <- Sys.getenv("ETHNICITY_BASELINE_DEATHS")
+      lower_geogs_deaths_table <- read_excel(filepath,
+                                             sheet = "Deaths_byRegionBroadEthnicgroup")
       
-      # E12000001, 0-14, 1: no deaths for 17 days either side of 2015-10-19 in ETHS data
-      daily_proportions <- lower_geogs_deaths_table %>% 
-        group_by(RGN09CD, Age_Group, Sex, Ethnic_Group) %>% 
-        mutate(average_deaths_over_period = slide_index_dbl(.x = deaths_total,
-                                                            .i = Reg_Date, 
-                                                            .f = mean, 
-                                                            .before = 17, 
-                                                            .after = 17,
-                                                            .complete = FALSE)) %>% 
-        group_by(Reg_Date, RGN09CD, Age_Group, Sex) %>% 
-        mutate(proportion = average_deaths_over_period / sum(average_deaths_over_period)) %>% 
-        ungroup() %>% 
-        dplyr::select(-c(deaths_total, average_deaths_over_period))
       
-      lower_geogs_deaths_table <- daily_death_totals %>%
-        left_join(daily_proportions, by = c("RGN09CD", "Reg_Date", "Age_Group", "Sex")) %>%
-        mutate(deaths_total = deaths_total * proportion) %>% 
-        dplyr::select(-proportion) %>%
+      
+      if (include_2019 == TRUE) {
+        filepath_2019 <- Sys.getenv("ETHNICITY_BASELINE_DEATHS_2019")
+        lower_geogs_deaths_table_2019 <- read_excel(filepath_2019,
+                                                    sheet = "Deaths_byRegionBroadEthnicgroup",
+                                                    range = "A2:F52676") %>% 
+          left_join(rgn_lkp, by = c("Region" = "RGN09CD")) %>% 
+          dplyr::select(Reg_Date, Region = RGN09NM, Age_group, Sex, Ethnicity_Broad, Deaths_total)
+        
+        lower_geogs_deaths_table <- bind_rows(lower_geogs_deaths_table,
+                                              lower_geogs_deaths_table_2019)
+        
+        end_date <- as.Date("2019-12-31")
+      } else {
+        end_date <- as.Date("2018-12-31")
+      }
+      
+      lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
+        mutate(Reg_Date = as.Date(as.character(Reg_Date), format = "%Y%m%d"),
+               Sex = as.integer(Sex),
+               Region = case_when(
+                 Region == "Yorkshire and the Humber" ~ "Yorkshire and The Humber",
+                 TRUE ~ Region
+               ),
+               Age_group = case_when(
+                 Age_group == "<15" ~ "0-14",
+                 TRUE ~ Age_group
+               )) %>%
+        left_join(ethnic_groups, by = "Ethnicity_Broad") %>%
+        filter(Sex %in% c(1, 2),
+               year(Reg_Date) >= 2015) %>%
+        left_join(rgn_lkp, by = c("Region" = "RGN09NM")) %>% 
+        dplyr::select(RGN09CD, Ethnic_Group, Reg_Date,
+                      Age_Group = Age_group, Sex,
+                      deaths_total = Deaths_total) %>%
         complete(RGN09CD = unique(rgn_lkp$RGN09CD),
                  Ethnic_Group = ethnic_groups$Ethnic_Group,
                  Reg_Date = seq.Date(from = as.Date("2015-01-01"),
@@ -146,41 +120,173 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
                  Sex,
                  fill = list(deaths_total = 0)) %>%
         arrange(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date)
-    }
+      
+      if (include_ethnicity_uplift == TRUE) {
+        daily_death_totals <- get_baseline_deaths(include_2019 = TRUE) %>% 
+          left_join(utla_lkp, by = "UTLAApr19CD") %>% 
+          group_by(RGN09CD, Reg_Date, Age_Group, Sex) %>% 
+          summarise(deaths_total = sum(deaths_total), .groups = "drop")
+        
+        # E12000001, 0-14, 1: no deaths for 17 days either side of 2015-10-19 in ETHS data
+        daily_proportions <- lower_geogs_deaths_table %>% 
+          group_by(RGN09CD, Age_Group, Sex, Ethnic_Group) %>% 
+          mutate(average_deaths_over_period = slide_index_dbl(.x = deaths_total,
+                                                              .i = Reg_Date, 
+                                                              .f = mean, 
+                                                              .before = 17, 
+                                                              .after = 17,
+                                                              .complete = FALSE)) %>% 
+          group_by(Reg_Date, RGN09CD, Age_Group, Sex) %>% 
+          mutate(proportion = average_deaths_over_period / sum(average_deaths_over_period)) %>% 
+          ungroup() %>% 
+          dplyr::select(-c(deaths_total, average_deaths_over_period))
+        
+        lower_geogs_deaths_table <- daily_death_totals %>%
+          left_join(daily_proportions, by = c("RGN09CD", "Reg_Date", "Age_Group", "Sex")) %>%
+          mutate(deaths_total = deaths_total * proportion) %>% 
+          dplyr::select(-proportion) %>%
+          complete(RGN09CD = unique(rgn_lkp$RGN09CD),
+                   Ethnic_Group = ethnic_groups$Ethnic_Group,
+                   Reg_Date = seq.Date(from = as.Date("2015-01-01"),
+                                       to = end_date,
+                                       by = "days"),
+                   Age_Group = unique(agegroup_lkp$Age_Group),
+                   Sex,
+                   fill = list(deaths_total = 0)) %>%
+          arrange(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date)
+      }
+      
+      
+      ethnicity_baseline <- get_denominators(start_year = 2015,
+                                             end_year = year(end_date),
+                                             ethnicity = TRUE) %>%
+        rename(RGN09CD = OfficialCode,
+               deaths_total = denominator) %>%
+        dplyr::select(-month)
+      
+      ethnicity_proportions <- calculate_ethnicity_proportions(data = ethnicity_baseline,
+                                                               ethnicity_field = Ethnic_Group,
+                                                               region_field = RGN09CD,
+                                                               age_field = Age_Group,
+                                                               sex_field = Sex,
+                                                               deaths_field = deaths_total)
+      
+      lower_geogs_deaths_table <- ethnicity_not_stated_adjustment(data = lower_geogs_deaths_table,
+                                                                  proportions = ethnicity_proportions,
+                                                                  ethnicity_field = Ethnic_Group,
+                                                                  deaths_field = deaths_total,
+                                                                  region_field = RGN09CD,
+                                                                  age_field = Age_Group,
+                                                                  sex_field = Sex,
+                                                                  date_field = Reg_Date)
+    } else if (deprivation == TRUE) {
 
+# deprivation and ethnicity -----------------------------------------------
+      filepath <- Sys.getenv("ETHNICITY_DEPRIVATION_BASELINE_DEATHS")
+      lower_geogs_deaths_table <- read_excel(filepath,
+                                             sheet = "Deaths_DepQuintileRegionEthni",
+                                             range = "R2C1:R667804C7")
+      
+      lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
+        mutate(Reg_Date = as.Date(as.character(Reg_Date), format = "%Y%m%d"),
+               Sex = as.integer(Sex)) %>%
+        left_join(ethnic_groups, by = "Ethnicity_Broad") %>%
+        filter(Sex %in% c(1, 2),
+               year(Reg_Date) >= 2015,
+               Deprivation_Quintile != "NULL") %>%
+        mutate(Deprivation_Quintile = as.integer(Deprivation_Quintile)) %>% 
+        dplyr::select(RGN09CD = Region, Ethnic_Group, Deprivation_Quintile,
+                      Reg_Date,
+                      Age_Group = Age_group, Sex,
+                      deaths_total = Deaths_total)
+      
+      if (include_2019 == TRUE) {
+        end_date <- as.Date("2019-12-31")
+      } else {
+        lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
+          filter(Reg_Date < as.Date("2019-01-01"))
+        end_date <- as.Date("2018-12-31")
+      }
+      
+      lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
+        complete(RGN09CD = unique(rgn_lkp$RGN09CD),
+                 Ethnic_Group = ethnic_groups$Ethnic_Group,
+                 Deprivation_Quintile = 1:5,
+                 Reg_Date = seq.Date(from = as.Date("2015-01-01"),
+                                     to = end_date,
+                                     by = "days"),
+                 Age_Group = unique(agegroup_lkp$Age_Group),
+                 Sex,
+                 fill = list(deaths_total = 0)) %>%
+        arrange(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, Reg_Date)
+      
+      if (include_ethnicity_uplift == TRUE) {
+        daily_death_totals <- get_baseline_deaths(include_2019 = TRUE,
+                                                  age_group_type = "nomis") %>% 
+          left_join(utla_lkp, by = "UTLAApr19CD") %>% 
+          group_by(RGN09CD, Reg_Date, Age_Group, Sex) %>% 
+          summarise(deaths_total = sum(deaths_total), .groups = "drop")
+        
+        daily_proportions <- lower_geogs_deaths_table %>% 
+          group_by(RGN09CD, Age_Group, Sex, Ethnic_Group, Deprivation_Quintile) %>% 
+          mutate(average_deaths_over_period = slide_index_dbl(.x = deaths_total,
+                                                              .i = Reg_Date, 
+                                                              .f = mean, 
+                                                              .before = 11, 
+                                                              .after = 11,
+                                                              .complete = FALSE)) %>% 
+          group_by(Reg_Date, RGN09CD, Age_Group, Sex) %>% 
+          mutate(proportion = average_deaths_over_period / sum(average_deaths_over_period)) %>% 
+          ungroup() %>% 
+          dplyr::select(-c(deaths_total, average_deaths_over_period))
+        
+        lower_geogs_deaths_table <- daily_death_totals %>%
+          left_join(daily_proportions, by = c("RGN09CD", "Reg_Date", "Age_Group", "Sex")) %>%
+          mutate(deaths_total = deaths_total * proportion) %>% 
+          dplyr::select(-proportion) %>%
+          complete(RGN09CD = unique(rgn_lkp$RGN09CD),
+                   Ethnic_Group = ethnic_groups$Ethnic_Group,
+                   Deprivation_Quintile = 1:5,
+                   Reg_Date = seq.Date(from = as.Date("2015-01-01"),
+                                       to = end_date,
+                                       by = "days"),
+                   Age_Group = unique(agegroup_lkp$Age_Group),
+                   Sex,
+                   fill = list(deaths_total = 0)) %>%
+          arrange(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date)
+      }
+      
+      ethnicity_deprivation_baseline <- get_denominators(start_year = 2015,
+                                                         end_year = year(end_date),
+                                                         ethnicity = TRUE, 
+                                                         deprivation = TRUE) %>%
+        rename(RGN09CD = OfficialCode,
+               deaths_total = denominator) %>%
+        dplyr::select(-month)
+      
+      ethnicity_proportions <- calculate_ethnicity_proportions(data = ethnicity_deprivation_baseline,
+                                                               ethnicity_field = Ethnic_Group,
+                                                               region_field = RGN09CD,
+                                                               age_field = Age_Group,
+                                                               sex_field = Sex,
+                                                               deaths_field = deaths_total,
+                                                               include_deprivation = TRUE)
+      
+      lower_geogs_deaths_table <- ethnicity_not_stated_adjustment(data = lower_geogs_deaths_table,
+                                                                  proportions = ethnicity_proportions,
+                                                                  ethnicity_field = Ethnic_Group,
+                                                                  deaths_field = deaths_total,
+                                                                  region_field = RGN09CD,
+                                                                  age_field = Age_Group,
+                                                                  sex_field = Sex,
+                                                                  date_field = Reg_Date,
+                                                                  include_deprivation = TRUE)
+    }
     
-    ethnicity_baseline <- get_denominators(start_year = 2015,
-                                           end_year = year(end_date),
-                                           ethnicity = TRUE) %>%
-      rename(RGN09CD = OfficialCode,
-             deaths_total = denominator) %>%
-      dplyr::select(-month)
-    
-    ethnicity_proportions <- calculate_ethnicity_proportions(data = ethnicity_baseline,
-                                                             ethnicity_field = Ethnic_Group,
-                                                             region_field = RGN09CD,
-                                                             age_field = Age_Group,
-                                                             sex_field = Sex,
-                                                             deaths_field = deaths_total)
-    
-    lower_geogs_deaths_table <- ethnicity_not_stated_adjustment(data = lower_geogs_deaths_table,
-                                                                proportions = ethnicity_proportions,
-                                                                ethnicity_field = Ethnic_Group,
-                                                                deaths_field = deaths_total,
-                                                                region_field = RGN09CD,
-                                                                age_field = Age_Group,
-                                                                sex_field = Sex,
-                                                                date_field = Reg_Date)
     
     return(lower_geogs_deaths_table)
   }
   
-  library(DBI)
-  library(odbc)
-  library(tidyr)
-  library(dbplyr)
-  library(dplyr)
-  library(lubridate)
   con <- dbConnect(odbc(), 
                    Driver = "SQL Server", 
                    Server = Sys.getenv("DATA_LAKE_SERVER"), 
@@ -251,11 +357,17 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
   }
   
   if (!is.null(pod)) {
-    pod_lkup <- read.csv("data/POD classification.csv",
-                         stringsAsFactors = FALSE)
+    pod_table <- tbl(con, in_schema(Sys.getenv("BIRTHS_DEATHS_DATABASE"), Sys.getenv("POD_TABLE")))
+    
+    pod_lkup <- pod_table %>% 
+      mutate(ENTITYCODE = as.integer(Entity),
+             DEATHCODE = as.integer(Death_Code)) %>% 
+      dplyr::select(ENTITYCODE, DEATHCODE,
+                    NHS.INDICATOR = NHS_Ind) %>% 
+      left_join(read.csv("data/POD lookup.csv"), by = c("DEATHCODE", "NHS.INDICATOR"),
+                copy = TRUE)
     pod_lkup_2 <- pod_lkup %>%
-      dplyr::select(DEATHCODE, NHS.INDICATOR, POD2 = POD) %>%
-      unique()
+      distinct(DEATHCODE, NHS.INDICATOR, POD2 = POD)
     
     pod_filter <- pod_lookup() %>%
       filter(pod_input %in% pod) %>%
@@ -268,8 +380,8 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
                               ifelse(Commest == "H", 
                                      "-799", # negative number so it doesn't join to anything
                                      Commest))) %>%
-      left_join(pod_lkup, by = c("Commest" = "ENTITYCODE"), copy = TRUE) %>%
-      left_join(pod_lkup_2, by = c("Est_Type" = "DEATHCODE", "NHS_Ind" = "NHS.INDICATOR"), copy = TRUE) %>%
+      left_join(pod_lkup, by = c("Commest" = "ENTITYCODE")) %>%
+      left_join(pod_lkup_2, by = c("Est_Type" = "DEATHCODE", "NHS_Ind" = "NHS.INDICATOR")) %>%
       mutate(POD_out = ifelse(Commest == "-799", "home",
                               ifelse(is.na(POD), POD2, POD))) %>%
       filter(POD_out %in% pod_filter)
@@ -300,14 +412,6 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
   }
     
   
-  # if (ethnicity == TRUE) {
-  #   # note, this doesn't work yet because I don't have access to HES linked mortality
-  #   lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
-  #     left_join(ethnic_groups_lookup(), by = "ethnicity_description", copy = TRUE)
-  #   
-  #   ethnic_groups <- unique(ethnic_groups_lookup()$Ethnic_Group)
-  # }
-  
   lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
     left_join(agegroup_lkp, by = c("xAGE_Year" = "Age"), copy = TRUE)
   
@@ -315,7 +419,7 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
     if (ethnicity == TRUE) {
       # ethnic group not in data yet because it wil be calculated once data retrieved from SQL server
       lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
-        group_by(LSOA11CD, Deprivation_Quintile, Sex, Age_Group, Reg_Date)
+        group_by(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, Reg_Date)
     } else if (ethnicity == FALSE) {
       lower_geogs_deaths_table <- lower_geogs_deaths_table %>%
         group_by(RGN09CD, Deprivation_Quintile, Sex, Age_Group, Reg_Date)
@@ -345,7 +449,7 @@ get_baseline_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod 
   if (include_2019 == TRUE) {
     deaths_2019 <- baseline_deaths_2019(ucod = ucod, btw_ucod = btw_ucod, ucods = ucods, cod = cod,
                                         pod = pod, deprivation = deprivation, ethnicity = ethnicity,
-                                        age_filter = age_filter)
+                                        age_filter = age_filter, age_group_type = age_group_type)
     
     lower_geogs_deaths_table <- bind_rows(lower_geogs_deaths_table,
                                           deaths_2019)
@@ -425,15 +529,14 @@ get_recent_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = 
     }
   }
   
-  library(DBI)
-  library(odbc)
-  library(dplyr)
-  library(dbplyr)
-  library(lubridate)
-  library(tidyr)
   
   source("R/utils.R")
-  agegroup_lkp <- age_group_lkp(age_filter = age_filter)
+  if (ethnicity == TRUE & deprivation == TRUE) {
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "nomis")
+  } else {
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter)
+  }
+  
   
   con <- dbConnect(odbc(), 
                    Driver = "SQL Server", 
@@ -451,7 +554,8 @@ get_recent_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = 
            DOR <= end_date,
            GOR9R %like% "E%",
            SEX %in% c(1, 2),
-           DATAQUAL %in% c(1, 2)) 
+           DATAQUAL %in% c(1, 2),
+           AGEC != "") 
   
   
   if (covid_only == TRUE) {
@@ -510,9 +614,17 @@ get_recent_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = 
   }
   
   if (!is.null(pod) | all_pod == TRUE) {
-    pod_lkup <- read.csv("data/POD classification.csv",
-                         stringsAsFactors = FALSE) %>%
-      rename(DEATHCODE_LKP = DEATHCODE)
+    pod_table <- tbl(con, in_schema(Sys.getenv("BIRTHS_DEATHS_DATABASE"), Sys.getenv("POD_TABLE")))
+    
+    pod_lkup <- pod_table %>% 
+      mutate(ENTITYCODE = as.integer(Entity),
+             DEATHCODE = as.integer(Death_Code)) %>% 
+      dplyr::select(ENTITYCODE, DEATHCODE,
+                    NHS.INDICATOR = NHS_Ind) %>% 
+      left_join(read.csv("data/POD lookup.csv"), by = c("DEATHCODE", "NHS.INDICATOR"),
+                copy = TRUE) %>% 
+      rename(DEATHCODE_LKP = DEATHCODE) %>% 
+      collect()
     pod_lkup_2 <- pod_lkup %>%
       dplyr::select(DEATHCODE_LKP_2 = DEATHCODE_LKP, NHS.INDICATOR, POD2 = POD) %>%
       unique()
@@ -619,7 +731,7 @@ get_recent_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = 
       }
     }
   }
-  
+ 
   recent_deaths_lower_geographies <- recent_deaths_lower_geographies %>%
     summarise(deaths_total = n()) %>%
     rename(Reg_Date = DOR,
@@ -731,28 +843,48 @@ get_recent_deaths <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = 
 #' @param sex_field unquoted name of field that contains sex
 #' @param date_field unquoted name of field that contains date
 ethnicity_not_stated_adjustment <- function(data, proportions = NULL, ethnicity_field, 
-                                            deaths_field, region_field, age_field, sex_field, date_field) {
+                                            deaths_field, region_field, age_field, sex_field, date_field,
+                                            include_deprivation = FALSE) {
   ethnicity_groups <- c("Asian", "Black", "Mixed", "Other", "White")
   
   copy_proportions <- !is.null(proportions)
   if (is.null(proportions)) proportions <- calculate_ethnicity_proportions(data, {{ ethnicity_field }}, 
                                                                            {{ region_field }}, {{ age_field }}, 
-                                                                           {{ sex_field }}, {{ deaths_field }})
+                                                                           {{ sex_field }}, {{ deaths_field }},
+                                                                           include_deprivation = include_deprivation)
   
-  unknown_deaths <- data %>%
-    filter(!({{ ethnicity_field }} %in% ethnicity_groups)) %>%
-    group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ date_field }}) %>%
-    summarise(summed_deaths = sum({{ deaths_field }}), .groups = "keep") %>%
-    ungroup() %>%
-    left_join(proportions, by = intersect(names(.), names(proportions)), copy = copy_proportions) %>%
-    mutate(unknown_deaths = summed_deaths * proportion) %>%
-    dplyr::select({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ ethnicity_field }}, {{ date_field }}, unknown_deaths)
-
-  recalculated_data <- data %>%
-    filter({{ ethnicity_field }} %in% ethnicity_groups) %>%
-    left_join(unknown_deaths, by = intersect(names(.), names(unknown_deaths))) %>%
-    mutate({{ deaths_field }} := {{ deaths_field }} + unknown_deaths) %>%
-    dplyr::select(-unknown_deaths)
+  if (include_deprivation == FALSE) {
+    unknown_deaths <- data %>%
+      filter(!({{ ethnicity_field }} %in% ethnicity_groups)) %>%
+      group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ date_field }}) %>%
+      summarise(summed_deaths = sum({{ deaths_field }}), 
+                .groups = "drop") %>%
+      left_join(proportions, by = intersect(names(.), names(proportions)), copy = copy_proportions) %>%
+      mutate(unknown_deaths = summed_deaths * proportion) %>%
+      dplyr::select({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ ethnicity_field }}, {{ date_field }}, unknown_deaths)
+    
+    recalculated_data <- data %>%
+      filter({{ ethnicity_field }} %in% ethnicity_groups) %>%
+      left_join(unknown_deaths, by = intersect(names(.), names(unknown_deaths))) %>%
+      mutate({{ deaths_field }} := {{ deaths_field }} + unknown_deaths) %>%
+      dplyr::select(-unknown_deaths)
+  } else {
+    unknown_deaths <- data %>%
+      filter(!({{ ethnicity_field }} %in% ethnicity_groups)) %>%
+      group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ date_field }}) %>%
+      summarise(summed_deaths = sum({{ deaths_field }}), 
+                .groups = "drop") %>%
+      left_join(proportions, by = intersect(names(.), names(proportions)), copy = copy_proportions) %>%
+      mutate(unknown_deaths = summed_deaths * proportion) %>%
+      dplyr::select({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ ethnicity_field }}, Deprivation_Quintile, {{ date_field }}, unknown_deaths)
+    
+    recalculated_data <- data %>%
+      filter({{ ethnicity_field }} %in% ethnicity_groups) %>%
+      left_join(unknown_deaths, by = intersect(names(.), names(unknown_deaths))) %>%
+      mutate({{ deaths_field }} := {{ deaths_field }} + unknown_deaths) %>%
+      dplyr::select(-unknown_deaths)
+  }
+  
   
   return(recalculated_data)
 }
@@ -760,17 +892,29 @@ ethnicity_not_stated_adjustment <- function(data, proportions = NULL, ethnicity_
 #' @description function to calculate the proportion of deaths in each ethnic group for a given day, location, 
 #'   age group and sex
 #' @inheritParams ethnicity_not_stated_adjustment
-calculate_ethnicity_proportions <- function(data, ethnicity_field, region_field, age_field, sex_field, deaths_field) {
+calculate_ethnicity_proportions <- function(data, ethnicity_field, region_field, age_field, sex_field, deaths_field, include_deprivation = FALSE) {
+  
   ethnicity_groups <- c("Asian", "Black", "Mixed", "Other", "White")
   
-  proportions <- data %>%
-    filter({{ ethnicity_field }} %in% ethnicity_groups) %>%
-    group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ ethnicity_field }}) %>%
-    summarise(summed_deaths := sum({{ deaths_field }}), .groups = "keep") %>%
-    group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}) %>%
-    mutate(proportion = summed_deaths / sum(summed_deaths)) %>%
-    ungroup() %>%
-    dplyr::select(-summed_deaths)
+  if (include_deprivation == FALSE) {
+    proportions <- data %>%
+      filter({{ ethnicity_field }} %in% ethnicity_groups) %>%
+      group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ ethnicity_field }}) %>%
+      summarise(summed_deaths := sum({{ deaths_field }}), .groups = "drop_last") %>%
+      mutate(proportion = summed_deaths / sum(summed_deaths)) %>%
+      ungroup() %>%
+      dplyr::select(-summed_deaths)
+  } else {
+    proportions <- data %>%
+      filter({{ ethnicity_field }} %in% ethnicity_groups) %>%
+      group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}, {{ ethnicity_field }}, Deprivation_Quintile) %>%
+      summarise(summed_deaths := sum({{ deaths_field }}), .groups = "keep") %>%
+      group_by({{ region_field }}, {{ age_field }}, {{ sex_field }}) %>% 
+      mutate(proportion = summed_deaths / sum(summed_deaths)) %>%
+      ungroup() %>%
+      dplyr::select(-summed_deaths)
+  }
+  
   
   return(proportions)
 }
@@ -780,13 +924,9 @@ calculate_ethnicity_proportions <- function(data, ethnicity_field, region_field,
 #'   baseline
 #' @inheritParams get_baseline_deaths
 baseline_deaths_2019 <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = NULL,
-                                 pod = NULL, deprivation = FALSE, ethnicity = FALSE, age_filter = NULL) {
-  library(DBI)
-  library(odbc)
-  library(tidyr)
-  library(dbplyr)
-  library(dplyr)
-  library(lubridate)
+                                 pod = NULL, deprivation = FALSE, ethnicity = FALSE, age_filter = NULL,
+                                 age_group_type = "original") {
+  
   con <- dbConnect(odbc(), 
                    Driver = "SQL Server", 
                    Server = Sys.getenv("DATA_LAKE_SERVER"), 
@@ -794,17 +934,40 @@ baseline_deaths_2019 <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod
                    Trusted_Connection = "True",
                    timeout = 120)
   
-  duplicates_2019 <- tbl(con, in_schema(Sys.getenv("MONTHLY_DEATHS_DATABASE"), Sys.getenv("DEATHS_VIEW_MONTHLY_DUPLICATES"))) %>%
-    rename(Reg_Date = DOR, 
-           Sex = SEX_STATISTICAL,
-           UTLAApr19CD = UTLA_code,
-           Age_Group = Age_group)
+  if (age_group_type == "original") {
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = age_group_type) %>%
+      distinct(Age_Group, Age_Group_PHA)
+    
+    duplicates_2019 <- tbl(con, in_schema(Sys.getenv("MONTHLY_DEATHS_DATABASE"), Sys.getenv("DEATHS_VIEW_MONTHLY_DUPLICATES"))) %>%
+      rename(Reg_Date = DOR, 
+             Sex = SEX_STATISTICAL,
+             UTLAApr19CD = UTLA_code,
+             Age_Group = Age_group)
+    
+    deaths_2019 <- tbl(con, in_schema(Sys.getenv("MONTHLY_DEATHS_DATABASE"), Sys.getenv("DEATHS_VIEW_MONTHLY_DISTINCT"))) %>%
+      rename(Reg_Date = DOR, 
+             Sex = SEX_STATISTICAL,
+             UTLAApr19CD = UTLA_code,
+             Age_Group = Age_group)
   
-  deaths_2019 <- tbl(con, in_schema(Sys.getenv("MONTHLY_DEATHS_DATABASE"), Sys.getenv("DEATHS_VIEW_MONTHLY_DISTINCT"))) %>%
-    rename(Reg_Date = DOR, 
-           Sex = SEX_STATISTICAL,
-           UTLAApr19CD = UTLA_code,
-           Age_Group = Age_group)
+  } else {
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = age_group_type) %>% 
+      distinct(Age, Age_Group)
+    
+    duplicates_2019 <- tbl(con, in_schema(Sys.getenv("MONTHLY_DEATHS_DATABASE"), Sys.getenv("DEATHS_VIEW_MONTHLY_DUPLICATES"))) %>%
+      rename(PHA_age_group = Age_group) %>% 
+      left_join(agegroup_lkp, by = c("xAGE_Year" = "Age"), copy = TRUE) %>% 
+      rename(Reg_Date = DOR, 
+             Sex = SEX_STATISTICAL,
+             UTLAApr19CD = UTLA_code)
+    
+    deaths_2019 <- tbl(con, in_schema(Sys.getenv("MONTHLY_DEATHS_DATABASE"), Sys.getenv("DEATHS_VIEW_MONTHLY_DISTINCT"))) %>%
+      rename(PHA_age_group = Age_group) %>% 
+      left_join(agegroup_lkp, by = c("xAGE_Year" = "Age"), copy = TRUE) %>% 
+      rename(Reg_Date = DOR, 
+             Sex = SEX_STATISTICAL,
+             UTLAApr19CD = UTLA_code)
+  }
   
   if (!is.null(age_filter)) {
     ages <- convert_age_filter(age_filter)
@@ -902,8 +1065,16 @@ baseline_deaths_2019 <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod
   
   # place of death filter
   if (!is.null(pod)) {
-    pod_lkup <- read.csv("data/POD classification.csv",
-                         stringsAsFactors = FALSE)
+    pod_table <- tbl(con, in_schema(Sys.getenv("BIRTHS_DEATHS_DATABASE"), Sys.getenv("POD_TABLE")))
+    
+    pod_lkup <- pod_table %>% 
+      mutate(ENTITYCODE = as.integer(Entity),
+             DEATHCODE = as.integer(Death_Code)) %>% 
+      dplyr::select(ENTITYCODE, DEATHCODE,
+                    NHS.INDICATOR = NHS_Ind) %>% 
+      left_join(read.csv("data/POD lookup.csv"), by = c("DEATHCODE", "NHS.INDICATOR"),
+                copy = TRUE) %>% 
+      collect()
     pod_lkup_2 <- pod_lkup %>%
       dplyr::select(DEATHCODE, NHS.INDICATOR, POD2 = POD) %>%
       unique()
@@ -1027,9 +1198,6 @@ baseline_deaths_2019 <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod
     }
   }
   
-  agegroup_lkp <- age_group_lkp(age_filter = age_filter) %>%
-    dplyr::select(Age_Group, Age_Group_PHA) %>%
-    unique()
   
   exclude_var <- "deaths_total"
   
@@ -1041,13 +1209,17 @@ baseline_deaths_2019 <- function(ucod = NULL, btw_ucod = NULL, ucods = NULL, cod
     collect() %>%
     bind_rows(duplicates_2019) %>%
     group_by_at(vars(-all_of(exclude_var))) %>%
-    summarise(deaths_total = sum(deaths_total), .groups = "keep") %>%
-    ungroup() %>%
+    summarise(deaths_total = sum(deaths_total), .groups = "drop") %>%
     mutate(Reg_Date = as.Date(Reg_Date, format = "%Y%m%d"),
-           Sex = as.integer(Sex)) %>%
-    rename(Age_Group_PHA = Age_Group) %>%
-    left_join(agegroup_lkp, by = "Age_Group_PHA") %>%
-    dplyr::select(-Age_Group_PHA)
+           Sex = as.integer(Sex))
+  
+  if (age_group_type == "original") {
+    deaths_2019 <- deaths_2019 %>%
+      rename(Age_Group_PHA = Age_Group) %>%
+      left_join(agegroup_lkp, by = "Age_Group_PHA") %>%
+      dplyr::select(-Age_Group_PHA)
+  }
+    
   
   return(deaths_2019)
 }

@@ -1,3 +1,4 @@
+source("R/libraries.R")
 source("R/function_predictions.R")
 source("R/function_visualisations.R")
 source("R/utils.R")
@@ -141,7 +142,6 @@ if (publication == "external") {
 
 input_params <- list(mytitle = paste("Excess mortality in England, week ending", format(final_date, "%d %B %Y")),
                      mysubtitle = mysubtitle,
-                     stakeholder = "external",
                      author = "[What is an experimental statistic?](https://www.ons.gov.uk/methodology/methodologytopicsandstatisticalconcepts/guidetoexperimentalstatistics)",
                      eng_charts = eng_charts,
                      eng_as_charts = eng_as_charts,

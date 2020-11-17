@@ -3,7 +3,6 @@ params:
   mytitle: NA
   mysubtitle: NA
   author: NA
-  stakeholder: NA
   eng_charts: NA
   eng_as_charts: NA
   region_charts: NA
@@ -28,6 +27,7 @@ output:
       in_header: phe_logo.html
 ---
 
+
 ```{r knitr_init, echo=FALSE, cache=FALSE, message=FALSE}
 library(knitr)
 library(dplyr)
@@ -39,23 +39,10 @@ source(here::here("R/utils.R"))
 ## Global options
 opts_chunk$set(echo=FALSE,
                cache=FALSE,
-               fig.width=12,
+               fig.width=17,
                fig.height=6,
                out.width='100%',
                warning=FALSE)
-
-```
-
-```{r stakeholder}
-if (params$stakeholder == "internal") {
-  evaluate <- TRUE
-  width <- 19
-  height <- 6
-} else if (params$stakeholder == "external") {
-  evaluate <- FALSE
-  width <- 10
-  height <- 6
-}
 
 ```
 
@@ -69,7 +56,7 @@ In this report the expected number of deaths is modelled using five years of dat
 
 ## All Persons
 
-```{r eng-weekly-sans-baseline, fig.width=13, fig.height=10, fig.cap="Weekly excess deaths by date of registration, England."}
+```{r eng-weekly-sans-baseline, fig.height=10, fig.cap="Weekly excess deaths by date of registration, England."}
 eng_charts$weekly_simple$England
 ```
 
@@ -246,7 +233,7 @@ reg_fig_cap <- paste0("Weekly excess deaths by date of registration, ",
 ```
 
 
-```{r regions-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=reg_fig_cap}
+```{r regions-weekly, fig.height=10, results='asis', fig.cap=reg_fig_cap}
 
 for (region in names(region_charts$weekly_simple$England)) {
   cat(paste("###", region, "\n"))
@@ -257,7 +244,7 @@ for (region in names(region_charts$weekly_simple$England)) {
 
 ## {.unlisted .unnumbered}
 
-The trend in excess deaths by region is shown in Figures \@ref(fig:regions-weekly1) to \@ref(fig:regions-weekly9), which allows the extent of the excess each week to be compared over time and for selected regions.
+The trend in excess deaths by region is shown in Figures \@ref(fig:regions-weekly-1) to \@ref(fig:regions-weekly-9), which allows the extent of the excess each week to be compared over time and for selected regions.
 
 ```{r region-cum-compare, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by region, England."}
 region_charts$cumulative_compare$England$cumulative_chart_num + region_charts$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
@@ -291,7 +278,7 @@ ucod_fig_cap <- paste0("Weekly excess deaths by date of registration, ",
 
 ```
 
-```{r deaths-by-cause-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=ucod_fig_cap}
+```{r deaths-by-cause-weekly, fig.height=10, results='asis', fig.cap=ucod_fig_cap}
 cat("### Ischaemic heart diseases \n")
 print(all_ucods$weekly_simple$England$`ischaemic heart diseases`)
 cat('\n\n')
@@ -347,7 +334,7 @@ cat('\n\n')
 
 ## {.unlisted .unnumbered}
 
-The trend in excess deaths for selected underlying causes of death (UCOD) is shown in Figures \@ref(fig:deaths-by-cause-weekly1) to \@ref(fig:deaths-by-cause-weekly12) which allow the extent of the excess to be compared over time for each cause. For each cause, the number of excess deaths without COVID-19 mentioned on the certificate (shown in the white part of the column) may be due to an increase in deaths from this cause during the period of the pandemic,  but may also reflect under-reporting of deaths involving COVID-19.
+The trend in excess deaths for selected underlying causes of death (UCOD) is shown in Figures \@ref(fig:deaths-by-cause-weekly-1) to \@ref(fig:deaths-by-cause-weekly-12) which allow the extent of the excess to be compared over time for each cause. For each cause, the number of excess deaths without COVID-19 mentioned on the certificate (shown in the white part of the column) may be due to an increase in deaths from this cause during the period of the pandemic,  but may also reflect under-reporting of deaths involving COVID-19.
 
 ```{r ucods-cumulative-compare, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B) by underlying cause of death, England"}
 all_ucods$cumulative_compare$England$cumulative_chart_num + all_ucods$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
@@ -377,7 +364,7 @@ mentions_fig_cap <- paste0("Weekly excess deaths by date of registration, all me
 
 ```
 
-```{r deaths-by-cause-mentions-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=mentions_fig_cap}
+```{r deaths-by-cause-mentions-weekly, fig.height=10, results='asis', fig.cap=mentions_fig_cap}
 cat("### Dementia and Alzheimer’s disease \n")
 print(dementia_mentions_vis$weekly_simple$England)
 cat('\n\n')
@@ -392,7 +379,9 @@ cat("\n\n")
 
 ```
 
-Figures \@ref(fig:deaths-by-cause-mentions-weekly1) to \@ref(fig:deaths-by-cause-mentions-weekly3) show weekly excess deaths where a specific cause was mentioned anywhere on the death certificate. These causes will have contributed to the death but not necessarily been the underlying cause.
+## {.unlisted .unnumbered}
+
+Figures \@ref(fig:deaths-by-cause-mentions-weekly-1) to \@ref(fig:deaths-by-cause-mentions-weekly-3) show weekly excess deaths where a specific cause was mentioned anywhere on the death certificate. These causes will have contributed to the death but not necessarily been the underlying cause.
 
 ## Place of Death {.tabset .tabset-fade .tabset-pills}
 
@@ -407,7 +396,7 @@ pod_fig_cap <- paste0("Weekly excess deaths by date of registration,",
 
 ```
 
-```{r place-of-death-weekly, fig.width=13, fig.height=10, results='asis', fig.cap=pod_fig_cap}
+```{r place-of-death-weekly, fig.height=10, results='asis', fig.cap=pod_fig_cap}
 cat("### Own home \n")
 print(all_pods$weekly_simple$England$Home)  
 cat('\n\n')
@@ -432,7 +421,7 @@ cat('\n\n')
 
 ## {.unlisted .unnumbered}
 
-Figures \@ref(fig:place-of-death-weekly1) to \@ref(fig:place-of-death-weekly5) show the weekly total excess registered deaths by place of death since week ending 27 March 2020. These charts can be used to understand the trend in excess deaths by place of death. This analysis should be interpreted as excess deaths within each place of death compared to what would have been expected based on data over the past five years.
+Figures \@ref(fig:place-of-death-weekly-1) to \@ref(fig:place-of-death-weekly-5) show the weekly total excess registered deaths by place of death since week ending 27 March 2020. These charts can be used to understand the trend in excess deaths by place of death. This analysis should be interpreted as excess deaths within each place of death compared to what would have been expected based on data over the past five years.
 
 ```{r pod-compare-cumulative, fig.width=13.5, fig.cap="Cumulative excess deaths (A) and the ratio of registered deaths to expected deaths (B), by place of death, England."}
 all_pods$cumulative_compare$England$cumulative_chart_num + all_pods$cumulative_compare$England$cumulative_chart_ratio + plot_annotation(tag_levels = 'A')
@@ -463,6 +452,7 @@ The PHE Daily GRO mortality model is used in PHE’s COVID-19 surveillance repor
 ```{r results='asis'}
 server_files <- list.files(Sys.getenv("SERVER_FILE_LOCATION"))
 server_files <- server_files[!grepl("latest.html$", server_files)]
+server_files <- server_files[grepl("^excess-mortality-in-england", server_files)]
 
 file_dates <- stringr::str_extract(server_files, "\\d{1,2}-[A-Z][a-z]{1,3}-\\d{1,4}")
 file_dates <- as.Date(file_dates, "%d-%b-%Y")
@@ -475,3 +465,6 @@ cat(paste0('* [',
     sep = '\n')
 ```
 
+## Code repository
+
+The code used to create this report is stored [here](https://github.com/publichealthengland/excess-deaths).

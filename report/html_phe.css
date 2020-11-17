@@ -15,6 +15,10 @@ blockquote {
     width: 100%;
 }
 
+div.main-container {
+  max-width: 1800px;
+}
+
 a {
     /*cursor: pointer;*/
     color: black;

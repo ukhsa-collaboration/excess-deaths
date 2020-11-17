@@ -7,7 +7,14 @@ mon_fri  <- function(x) {
 fri <- function(x) {
   mondays <- scales::fullseq(x, "1 week")
   fridays <- mondays - lubridate::days(3)
-  sort(c(fridays))
+  fridays <- sort(c(fridays))
+  if ((length(fridays) %% 2) == 0) {
+    fridays <- fridays[c(FALSE, TRUE)]
+  } else {
+    fridays <- fridays[c(TRUE, FALSE)]
+  }
+  
+  return(fridays)
 }
 
 cumulative_excess_deaths <- function(death_data, area_name, cause_name = "all cause",
@@ -172,7 +179,7 @@ cumulative_excess_deaths <- function(death_data, area_name, cause_name = "all ca
               size = 5)
   
   if (nrow(friday_labels) > 0) {
-    offset <- (end_date - start_date) / 2
+    offset <- as.numeric((end_date - start_date) / 2)
     excessdeaths_chart <- excessdeaths_chart +
       geom_text(data = friday_labels,
                 aes(label = label,
@@ -205,7 +212,8 @@ cumulative_excess_deaths <- function(death_data, area_name, cause_name = "all ca
          caption = caption,
          subtitle = subtitle) +
     theme(legend.position = "bottom",
-          plot.margin = unit(c(1, 10, 1, 1), "lines")) +
+          plot.margin = unit(c(1, 10, 1, 1), "lines"),
+          axis.text = element_text(size = rel(1.1))) +
     coord_cartesian(clip = 'off') # prevents labels that spill off the side of the chart from being truncated
   
   return(excessdeaths_chart)
@@ -583,7 +591,8 @@ weekly_deaths_simple <- function(death_data, area_name, cause_name = "all cause"
          subtitle = subtitle) +
     theme(legend.position = "bottom",
           legend.text = element_text(size = rel(1.05)),
-          legend.key.size = unit(1.5,"line"))
+          legend.key.size = unit(1.5,"line"),
+          axis.text = element_text(size = rel(1.1)))
   
   if (show_inset == TRUE) {
     covid_proportions <- covid_proportions %>%
@@ -712,7 +721,7 @@ cumulative_compare <- function(death_data, area_name,
            excess_deaths = registered_deaths - expected_deaths,
            ratio = registered_deaths / expected_deaths,
            ratio_label = case_when(
-             significance == "Significant" ~ paste0("x", round_correct(ratio, 2)),
+             significance == "Significant" ~ paste0("x", format(round_correct(ratio, 2), nsmall = 2)),
              TRUE ~ NA_character_))
   
   if (sum(data$significance == "Not significant") > 0) {
@@ -732,8 +741,8 @@ cumulative_compare <- function(death_data, area_name,
   excess_deaths_labels <- data %>%
     dplyr::select(!! sym(axis_field), excess_deaths) %>%
     mutate(x = case_when(
-            excess_deaths > 0 ~ (excess_deaths) + (max(max(excess_deaths), abs(min(excess_deaths))) * 0.08),
-            TRUE ~ (excess_deaths) - (max(max(excess_deaths), abs(min(excess_deaths))) * 0.08)),
+            excess_deaths > 0 ~ (excess_deaths) + (max(max(excess_deaths), abs(min(excess_deaths))) * 0.11),
+            TRUE ~ (excess_deaths) - (max(max(excess_deaths), abs(min(excess_deaths))) * 0.11)),
            excess_deaths_label = scales::comma(round_correct(excess_deaths, 0), accuracy = 1))
   
   proportions <- data %>%
@@ -894,10 +903,11 @@ cumulative_compare <- function(death_data, area_name,
     mutate(cutoff = sum(value)) %>%
     ungroup() %>%
     mutate(label = case_when(
-      type == "COVID-19 mentioned\non death certificate" & value == cutoff ~ NA_character_,
-      abs(value) < (diff(range(0, range(cutoff))) * 0.1) ~ NA_character_,
-      TRUE ~scales::comma(round_correct(value, 0), accuracy = 1)),
-      facet = "Total deaths")
+              type == "COVID-19 mentioned\non death certificate" & value == cutoff ~ NA_character_,
+              abs(value) < (diff(range(0, range(cutoff))) * 0.1) ~ NA_character_,
+              value < 0 ~ NA_character_,
+              TRUE ~scales::comma(round_correct(value, 0), accuracy = 1)),
+           facet = "Total deaths")
     
   ratio_x_limit <- min(c(data$ratio * 0.8, 0.9))
   
@@ -1494,7 +1504,8 @@ weekly_deaths_simple_facetted <- function(death_data, area_name, cause_name = "a
          subtitle = subtitle) +
     theme(legend.position = "bottom",
           legend.text = element_text(size = rel(1.05)),
-          legend.key.size = unit(1.5,"line"))
+          legend.key.size = unit(1.5,"line"),
+          axis.text = element_text(size = rel(1.1)))
   
   return(weekly_deaths)
   

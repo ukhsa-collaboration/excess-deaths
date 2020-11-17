@@ -16,18 +16,7 @@ create_baseline <- function(denominators = NULL,
                             pod = NULL, deprivation = FALSE, ethnicity = FALSE,
                             model_filename, include_date_extension = FALSE, include_2019 = FALSE,
                             disease_name = NULL, include_ethnicity_uplift = FALSE, age_filter = NULL) {
-  library(lubridate)
-  library(timeDate)
-  library(ggplot2)
-  library(tidyr)
-  library(MASS)
-  library(dplyr)
-  library(slider)
-  library(purrr)
-  library(lme4)
-  library(assertr)
-  library(dtplyr)
-  
+ 
   # create directory if it doesn't exist already
   dir.create("model_outputs", showWarnings = FALSE)
   if (include_date_extension == TRUE) {
@@ -101,8 +90,17 @@ create_baseline <- function(denominators = NULL,
                                            levels = as.character(1:5)))
     }
   } else {
-    denominators <- denominators %>%
-      mutate(Ethnic_Group = factor(Ethnic_Group))
+    if (deprivation == FALSE) {
+      denominators <- denominators %>%
+        mutate(Ethnic_Group = factor(Ethnic_Group))
+    } else {
+      denominators <- denominators %>%
+        mutate(Ethnic_Group = factor(Ethnic_Group),
+               Deprivation_Quintile = factor(Deprivation_Quintile, 
+                                             levels = as.character(1:5)))
+      
+    }
+    
   }
   denominators <- denominators %>%
     sex_change_0_1(Sex) %>%
@@ -116,12 +114,24 @@ create_baseline <- function(denominators = NULL,
   
   # do preprocessing steps on baseline data
   if (ethnicity == TRUE) {
-    baseline_data <- baseline_data %>%
-      arrange(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
-      preprocess_deaths(Reg_Date, deaths_total, Sex, Age_Group, holidays) %>%
-      mutate(Ethnic_Group = factor(Ethnic_Group)) %>%
-      left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month")) %>%
-      dplyr::select(-month)
+    if (deprivation == FALSE) {
+      baseline_data <- baseline_data %>%
+        arrange(RGN09CD, Ethnic_Group, Sex, Age_Group, Reg_Date) %>%
+        preprocess_deaths(Reg_Date, deaths_total, Sex, Age_Group, holidays) %>%
+        mutate(Ethnic_Group = factor(Ethnic_Group)) %>%
+        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month")) %>%
+        dplyr::select(-month)
+    } else {
+      baseline_data <- baseline_data %>%
+        arrange(RGN09CD, Ethnic_Group, Deprivation_Quintile, Sex, Age_Group, Reg_Date) %>%
+        preprocess_deaths(Reg_Date, deaths_total, Sex, Age_Group, holidays) %>%
+        mutate(Ethnic_Group = factor(Ethnic_Group),
+               Deprivation_Quintile = factor(Deprivation_Quintile, 
+                                             levels = as.character(1:5))) %>%
+        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "month")) %>%
+        dplyr::select(-month)
+    }
+    
   } else {
     if (deprivation == TRUE) {
       baseline_data <- baseline_data %>%
@@ -178,18 +188,34 @@ create_baseline <- function(denominators = NULL,
   cat("building model...")
   start_time <- Sys.time()
   if (ethnicity == TRUE) {
-    model <- glm(deaths_total ~ day1 +
-                   day2 + day3 + day4 + month1 +
-                   month2 + month3 + month4 + month5 + month6 +
-                   month7 + month8 + month9+ month10 + month11 +
-                   WedpreE + ThurpreE + TuespostE + WedpostE +
-                   ThurpostE + FripostE + MonpostE1 + TuespostE1 +
-                   BH_nearest_WD + BH_next_nearest_WD +
-                   years_from_20161231 + Ethnic_Group +
-                   Sex:Age_Group +
-                   RGN09CD +
-                   offset(log(denominator)), family = quasipoisson,
-                 data = baseline_data)
+    if (deprivation == TRUE) {
+      model <- glm(deaths_total ~ day1 +
+                     day2 + day3 + day4 + month1 +
+                     month2 + month3 + month4 + month5 + month6 +
+                     month7 + month8 + month9+ month10 + month11 +
+                     WedpreE + ThurpreE + TuespostE + WedpostE +
+                     ThurpostE + FripostE + MonpostE1 + TuespostE1 +
+                     BH_nearest_WD + BH_next_nearest_WD +
+                     years_from_20161231 + Ethnic_Group:Deprivation_Quintile +
+                     Sex:Age_Group +
+                     RGN09CD +
+                     offset(log(denominator)), family = quasipoisson,
+                   data = baseline_data)
+    } else {
+      model <- glm(deaths_total ~ day1 +
+                     day2 + day3 + day4 + month1 +
+                     month2 + month3 + month4 + month5 + month6 +
+                     month7 + month8 + month9+ month10 + month11 +
+                     WedpreE + ThurpreE + TuespostE + WedpostE +
+                     ThurpostE + FripostE + MonpostE1 + TuespostE1 +
+                     BH_nearest_WD + BH_next_nearest_WD +
+                     years_from_20161231 + Ethnic_Group +
+                     Sex:Age_Group +
+                     RGN09CD +
+                     offset(log(denominator)), family = quasipoisson,
+                   data = baseline_data)
+    }
+    
   } else {
     if (deprivation == TRUE) {
       baseline_data <- baseline_data %>%

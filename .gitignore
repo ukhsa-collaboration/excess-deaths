@@ -4,6 +4,11 @@
 .Ruserdata
 .Renviron
 
+status_update.html
 *.png
 *.html
+model_outputs/
 *.zip
+predictions/
+methodology/
+report/report_checks*.xlsx
