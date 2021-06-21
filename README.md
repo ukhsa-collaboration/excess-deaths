@@ -11,27 +11,27 @@ published by Public Health England.
 This README file contains instructions for how to use the repository
 including:
 
-  - [Data requirements](#data-requirements)
-  - [Structure of the repository](#structure-of-the-repository)
-  - [Recreating package versions using
+-   [Data requirements](#data-requirements)
+-   [Structure of the repository](#structure-of-the-repository)
+-   [Recreating package versions using
     `renv`](#recreating-package-versions-using-renv)
-  - [Guidance on how to produce the
+-   [Guidance on how to produce the
     reports](#guidance-on-how-to-produce-the-reports)
-  - [Contributors](#contributors)
+-   [Contributors](#contributors)
 
 ### Data requirements
 
 These reports require:
 
-  - record level data for deaths, which include information on age, sex,
+-   record level data for deaths, which include information on age, sex,
     resident geography, ethnicity, place of death and cause of death.
     These data cover the time period January 2015 to December 2019, and
     then deaths from March 20th 2020 onwards
-  - population estimates for the same time periods described above
-    copntaining the same demographic information as above
+-   population estimates for the same time periods described above
+    containing the same demographic information as above
 
 The [methodology
-document](https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/900236/EM_Methods1.pdf)
+document](https://fingertips.phe.org.uk/documents/EMMethodology.pdf)
 describes the data used in more detail.
 
 ### Guidance on how to produce the reports
@@ -59,22 +59,28 @@ in a folder called `predictions` in specified location in a shared area.
 If they have already been generated, these files are read straight into
 the R session. The function then imports death data from the recent
 deaths database, which are plotted alongside the predicted deaths. The
-output from `generate_visualisations()` is a list of ggplot objects,
-which then get passed into `report/gov_uk.Rmd` to produce the html
-report.
+output from `generate_visualisations()` is either a list of ggplot
+objects, which then get passed into `report/region_report.Rmd` to
+produce the html report, or the path to a csv file containing expected,
+registered and covid deaths by week for a particular population
+subgroup.
 
 ### Structure of the repository
 
     +-- R/
+    |   +-- create_all_models.R - script that creates the underpinning models for the national report
+    |   +-- create_report_data.R - a single function that creates all of the data outputs for the weekly report
     |   +-- function_deaths_data.R - functions to import deaths data from the data repository in different cuts
     |   +-- function_modelling.R - a function to create model objects for each subsection of the population
     |   +-- function_monthly_populations.R - a function to generate monthly populations from the data repository
     |   +-- function_predictions.R - function to apply models generated from function_modelling.R to make predictions for recent dates
     |   +-- function_visualisations.R - function that combines predictions from function_predictions.R with actual deaths data from the daily deaths database, to produce the visualisations for reporting
+    |   +-- libraries.R - script that loads all the libraries used in the project
+    |   +-- mentions_models.R - script that creates the underpinning models for the cause of death section in the national report
     |   +-- utils.R - some general utility functions
     |   +-- utils_charts.R - charting functions for the report
     |   +-- utils_phecharts.R - branding functions
-    +-- data/ - contains lookup files that aren't available centrally
+    +-- data/ - contains a place of death lookup file, and population estimates for regions by age, sex, deprivation and ethnicity
     +-- tests/ - test-assertr.R; some functions included to ensure data processing within functions is working as expected
     +-- renv/ - automatically generated using the renv package, no need to modify
     +-- report/ 
@@ -97,12 +103,15 @@ user must run the following line once in the console:
 
 ### Contributors
 
-  - Sharmani Barnard, Senior Statistical Advisor
-  - Sebastian Fox, Principal Data Scientist
-  - Allan Baker, Deputy Head of Population Health Analysis
-  - Paul Burton, Professor of Data Science for Health at Newcastle
+-   Sharmani Barnard, Senior Statistical Advisor
+-   Sebastian Fox, Principal Data Scientist
+-   Zachary Waller, Senior Data Scientist
+-   Leigh Dowd, Senio Public Health Intelligence Analyst
+-   Allan Baker, Deputy Head of Population Health Analysis
+-   Paul Burton, Professor of Data Science for Health at Newcastle
     University and Honorary Consultant in Public Health (Epidemiology
     and Statistics) to PHE
-  - Peter Goldblatt, Senior advisor University College London Institute
+-   Peter Goldblatt, Senior advisor University College London Institute
     of Health Equity and Statistical Advisor to PHE
-  - Justine Fitzpatrick, Head of Population Health Analysis
+-   Paul Fryers, Head of Public Health Data Science
+-   Justine Fitzpatrick, Head of Population Health Analysis
