@@ -1,164 +1,143 @@
-source("R/libraries.R")
+suppressMessages(source("R/libraries.R"))
 source("R/function_predictions.R")
 source("R/function_visualisations.R")
 source("R/utils.R")
+readRenviron(".Renviron")
 source("R/function_monthly_populations.R")
 source("tests/test-assertr.R")
 source("R/function_deaths_data.R")
 source("R/utils_charts.R")
 source("R/utils_phecharts.R")
-final_date <- final_report_date()
-publication <- "external"
-# publication <- "circulation"
+source("R/collate_nat_exmort.R")
+source("R/create_report_data.R")
+source("R/email.R")
 
-caption <- paste("\nLatest week not available as ethnicity has to be assigned via linkage with hospital records")
+
+final_date <- final_report_date()
+
 ethnic_group_final_date <- final_date - 7
 
-eng_charts <- generate_visualisations("model_outputs/glm_all_utlas_20200522.rds",
-                                      visualisation_geography = "england",
-                                      include_covid_ribbon = TRUE, end_date = final_date, 
-                                      deprivation = FALSE, show_inset = TRUE)
+eth_dep_setting <- TRUE
+age_group_type_setting <- "nomis"
+pop_type_setting <- "estimates"
+from_date <- as.Date("2020-03-21")
 
-eng_as_charts <- generate_visualisations("model_outputs/glm_all_utlas_20200522.rds",
-                                         visualisation_geography = "england",
-                                         facet_fields = c("Age_Group", "Sex"),
-                                         split_chart = "Sex",
-                                         include_covid_ribbon = TRUE, 
-                                         end_date = final_date, 
-                                         deprivation = FALSE, 
-                                         axis_title = "Age group (years)",
-                                         include_totals = TRUE)
+if (Sys.getenv("USERNAME") == "sebastian.fox") 
+  send_email(subject = "AUTO-EMAIL: National report is beginning")
 
-region_charts <- generate_visualisations("model_outputs/glm_all_utlas_20200522.rds",
-                                         visualisation_geography = "england", 
-                                         facet_fields = "RGN09CD",
-                                         split_chart = "RGN09CD",
-                                         end_date = final_date,
-                                         include_covid_ribbon = TRUE, 
-                                         deprivation = FALSE,
-                                         axis_title = "Region")
+complete_status <- generate_report_data(final_date = final_date,
+                                        eth_dep_setting = eth_dep_setting,
+                                        age_group_type_setting = age_group_type_setting,
+                                        pop_type_setting = pop_type_setting,
+                                        from_date = from_date)
 
-#### ETHNICITY CHARTS ####
-england_ethnicity_sex <- generate_visualisations("model_outputs/20200619_ethnicity.rds",
-                                                 ethnicity = TRUE, 
-                                                 visualisation_geography = "england",
-                                                 facet_fields = c("Ethnic_Group", "Sex"), 
-                                                 split_chart = "Sex",
-                                                 end_date = ethnic_group_final_date, 
-                                                 include_covid_ribbon = TRUE, 
-                                                 axis_title = "Ethnic group",
-                                                 caption = caption)
-#### DEPRIVATION CHARTS ####
-england_deprivation <- generate_visualisations("model_outputs/20200616_deprivation.rds",
-                                               deprivation = TRUE, 
-                                               visualisation_geography = "england",
-                                               facet_fields = "Deprivation_Quintile", 
-                                               end_date = final_date, 
-                                               include_covid_ribbon = TRUE, 
-                                               axis_title  = "Deprivation quintile")
+objects_that_are_here <- complete_status$objects_that_are_here
+is_everything_here <- complete_status$is_everything_here
 
+# If everything exists, copy the data files into the file format used by Power BI
+# Then the total numbers in each subgroup are compared
+# Then the data file is produced
 
-#### MORTALITY BY CAUSE OF DEATH ####
+# Otherwise, print out which objects are missing
 
-# all diseases compared
-causes <- cause_code_lookup(table_output = TRUE) %>%
-  filter(name_of_cause != "COVID-19") %>% 
-  pull(name_of_cause) %>%
-  unique()
-model_files <- model_references() %>%
-  filter(reference %in% causes) %>%
-  dplyr::select(reference, model_file) %>% 
-  tibble::deframe()
-
-captions <- model_references() %>%
-  filter(reference %in% causes) %>%
-  dplyr::select(reference, caption) %>% 
-  tibble::deframe()
-
-all_ucods <- generate_visualisations(model_filename = model_files,
-                                     all_ucod = TRUE,
-                                     end_date = final_date, 
-                                     deprivation = FALSE,
-                                     visualisation_geography = "england",
-                                     facet_fields = "name_of_cause",
-                                     split_chart = "name_of_cause",
-                                     include_covid_ribbon = TRUE,
-                                     caption = captions,
-                                     axis_title = "Underlying cause of death")
-
-# dementia mentions
-dementia_mentions_vis <- generate_visualisations(cod = c("F01", "F03", "G30"),
-                                                 model_filename = "model_outputs/glm_all_utlas_dementia_mentions_20200522.rds",
-                                                 cause_name = "all mentions of dementia and Alzheimer's disease",
-                                                 caption = "ICD10 reference: All mentions of F01, F03 and G30",
-                                                 include_covid_ribbon = FALSE, 
-                                                 end_date = final_date,
-                                                 visualisation_geography = "england")
-
-# acute respiratory mentions
-ari_mentions_vis <- generate_visualisations(cod = paste0("J", formatC(0:22, width = 2, flag = "0")),
-                                            model_filename = "model_outputs/glm_all_utlas_ari_mentions_20200522.rds",
-                                            cause_name = "all mentions of acute respiratory infections (incl. flu and pneumonia)",
-                                            caption = "ICD10 reference: All mentions of J00-J22",
-                                            include_covid_ribbon = FALSE, 
-                                            end_date = final_date,
-                                            visualisation_geography = "england")
-
-# diabetes mellitus mentions
-dm_vis <- generate_visualisations(cod = paste0("E", 10:14),
-                                  model_filename = "model_outputs/glm_all_utlas_dm_20200522.rds",
-                                  cause_name = "all mentions of diabetes mellitus",
-                                  caption = "ICD10 reference: All mentions of E10-E14",
-                                  include_covid_ribbon = FALSE, 
-                                  end_date = final_date,
-                                  visualisation_geography = "england")
-
-
-#### MORTALITY BY PLACE OF DEATH ####
-# All places of death combined
-pods <- pod_lookup() %>%
-  pull(pod_filter) %>%
-  unique()
-model_files <- model_references() %>%
-  filter(reference %in% pods) %>%
-  dplyr::select(reference, model_file) %>% 
-  tibble::deframe()
-
-all_pods <- generate_visualisations(model_filename = model_files,
-                                    all_pod = TRUE,
-                                    end_date = final_date, 
-                                    deprivation = FALSE,
-                                    visualisation_geography = "england",
-                                    facet_fields = "POD_out",
-                                    split_chart = "POD_out",
-                                    include_covid_ribbon = TRUE,
-                                    axis_title = "Place of death")
-
-if (publication == "external") {
-  mysubtitle <- "Experimental Statistics"
-} else if (publication == "circulation") {
-  mysubtitle <- "OFFICIAL SENSITIVE: DRAFT - Not for wider circulation (Experimental Statistics)"
+if (is_everything_here) {
+  if (Sys.getenv("USERNAME") == "sebastian.fox") 
+    send_email(subject = "AUTO-EMAIL: National report ran successfully")
+  
+  path <- collate_powerbi_files_for_powerbi(geography = "england", 
+                                            final_date = final_date)  
+  
+  # QA the numbers ----------------------------------------------------------
+  # bear in mind, all persons, age group, region, ethnicity-sex, deprivation are now all the same model
+  # this table shows the difference between the cumulative all persons deaths (registered, expected and covid) compared to the totals within each subgroup
+  qa <- qa_power_bi_file(path)
+  
+  if (Sys.getenv("USERNAME") != "sebastian.fox") View(qa)
+  
+  write.csv(qa,
+            paste0(Sys.getenv("POWERBI_FILESHARE"),
+                   "/qa/compared_to_all_persons_",
+                   gsub("-", "", as.character(final_date)),
+                   ".csv"),
+            row.names = FALSE)
+  
+  # This check removed the counts for the final week and compares the totals with the previous week csv file
+  # Bear in mind:
+  # - cause of deaths gets updated on the death certificate over time, so most of the differences are related to 
+  #    covid deaths and other causes of deaths being assigned
+  compared_to_last_week <- compare_this_and_last_weeks_file(path)
+  
+  if (Sys.getenv("USERNAME") != "sebastian.fox")  View(compared_to_last_week)
+  
+  write.csv(compared_to_last_week,
+            paste0(Sys.getenv("POWERBI_FILESHARE"),
+                   "/qa/compared_to_last_week_",
+                   gsub("-", "", as.character(final_date)),
+                   ".csv"),
+            row.names = FALSE)
+  
+  
+  # Create an excel file containing all of the data for public use --------
+  
+  xlsx_file <- create_excel_file(input_filepath = path,
+                                 output_filepath = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                                                          "/EMData.xlsx"))
+  
+  
+  # Install RDCOMClient from binaries ---------------------------------------
+  
+  if (!require(RDCOMClient)) {
+    url <- "http://www.omegahat.net/R/bin/windows/contrib/4.0.0/RDCOMClient_0.94-0.zip"
+    install.packages(url, repos = NULL, type = "binary")
+  }
+  library(RDCOMClient)
+  
+  # Convert the Excel file to ods -------------------------------------------
+  convert_to_ods(xlsx_file)
+  
+  # move ods file to E&S fileshare
+  # archive existing file
+  
+  old_filename <- paste0(Sys.getenv("E_AND_S_FILESHARE"),
+                         "EMData",
+                         date_as_string(path, 
+                                        week_type = "last week",
+                                        date_type = "publication date"),
+                         ".ods")
+  
+  current_filename <- paste0(Sys.getenv("E_AND_S_FILESHARE"),
+                             "EMData.ods")
+  # if last week's file hasn't been archived already with a date stamp, then do it
+  if (!file.exists(old_filename))
+    file.copy(from = current_filename,
+              to = old_filename)
+  
+  # then copy the version created from the "convert_to_ods()" above over the 
+  # previous "current" version for putting on the website
+  file.copy(from = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                          "/EMData.ods"),
+            to = current_filename,
+            overwrite = TRUE)
+  
+  if (Sys.getenv("USERNAME") == "sebastian.fox") 
+    send_email(subject = "AUTO-EMAIL: National report all files generated successfully",
+             include_success_attachments = TRUE)
+  
+  
+} else {
+  if (Sys.getenv("USERNAME") == "sebastian.fox") 
+    send_email(subject = "AUTO-EMAIL: National report failed")
+  
+  missing_objects <- names(objects_that_are_here)[objects_that_are_here == FALSE]
+  if (length(missing_objects) == 1) {
+    word <- "is"
+  } else {
+    word <- "are"
+  }
+  print(paste(paste(missing_objects, collapse = ", "),
+              word,
+              "missing"))
 }
 
-input_params <- list(mytitle = paste("Excess mortality in England, week ending", format(final_date, "%d %B %Y")),
-                     mysubtitle = mysubtitle,
-                     author = "[What is an experimental statistic?](https://www.ons.gov.uk/methodology/methodologytopicsandstatisticalconcepts/guidetoexperimentalstatistics)",
-                     eng_charts = eng_charts,
-                     eng_as_charts = eng_as_charts,
-                     region_charts = region_charts,
-                     utla_lkp = utla_lookup(),
-                     england_ethnicity_sex = england_ethnicity_sex,
-                     england_deprivation = england_deprivation,
-                     all_ucods = all_ucods,
-                     dementia_mentions_vis = dementia_mentions_vis,
-                     ari_mentions_vis = ari_mentions_vis,
-                     dm_vis = dm_vis,
-                     all_pods = all_pods)
 
-output_filename <- paste0("excess-mortality-in-england-week-ending-",
-                          format(final_date, "%d-%b-%Y"), ".html")
-
-system.time(rmarkdown::render("report/gov_uk.Rmd",
-                              params = input_params,
-                              output_file = output_filename))
 

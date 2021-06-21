@@ -9,17 +9,16 @@ aggregate_Scillies_CoL <- function(data, area_code, agg_field) {
     mutate({{ area_code }} := case_when({{ area_code }} == IoS ~ Corn,
                                                      {{ area_code }} == CoL ~ Hack,
                                                      TRUE ~ {{ area_code}})) %>%
-    group_by_at(vars(- {{ agg_field }})) %>%
-    summarise(!!as_label(enquo(agg_field)) := sum({{ agg_field }}),
-              .groups = "keep") %>%
-    ungroup()
+    group_by(across(!c({{ agg_field }}))) %>%
+    summarise({{ agg_field }} := sum({{ agg_field }}),
+              .groups = "drop")
   return(data)
 }
 
 #' @description returns a vector of easter fridays when given a vector of holiday dates
-calc_easter_fridays <- function(dates) {
+calc_easter_fridays <- function(dates, include_christmas_friday = TRUE) {
   easter_fridays <- tibble(holiday_date = dates) %>%
-    mutate(Day_name = wday(holiday_date, 
+    mutate(Day_name = wday(holiday_date,
                            label = TRUE,
                            abbr = FALSE),
            easter_friday = holiday_date %in% (dates - 3),
@@ -28,10 +27,18 @@ calc_easter_fridays <- function(dates) {
            easter_weekend = case_when(
              easter_monday | easter_friday ~ TRUE,
              TRUE ~ FALSE
-           )) %>%
-    filter(easter_friday,
-           month != 12) %>%
-    arrange(holiday_date) %>% 
+           ))
+  
+  if (include_christmas_friday == TRUE) {
+    easter_fridays <- easter_fridays %>%
+      filter(easter_friday)
+  } else {
+    easter_fridays <- easter_fridays %>%
+      filter(easter_friday,
+             month != 12)
+  }
+  easter_fridays <- easter_fridays %>%
+    arrange(holiday_date) %>%
     pull(holiday_date)
   return(easter_fridays)
 }
@@ -133,54 +140,35 @@ add_day_weighting <- function(data, date_field) {
 #' @description moves all agg_field values recorded on a saturday to the friday
 #'   prior to the weekend, and the sunday to the monday following the weekend
 weekends_to_nearest_work_day <- function(data, date_field, agg_field) {
+  
+  
   weekend_data <- data %>%
-    mutate(saturday = wday({{ date_field }}) == 7,
-           saturday_mark = case_when(saturday == TRUE | lead(saturday == TRUE) ~ TRUE,
-                                     TRUE ~ FALSE),
-           sunday = wday({{ date_field }}) == 1,
-           sunday_mark = case_when(sunday == TRUE | lag(sunday == TRUE) ~ TRUE,
+    mutate(sunday = wday({{ date_field }}) %in% c(7),
+           sunday_mark = case_when(sunday == TRUE | 
+                                     lag(sunday) == TRUE |
+                                     lag(sunday, n = 2) == TRUE ~ TRUE,
                                    TRUE ~ FALSE))
   
-  friday_data <- weekend_data %>%
-    filter(saturday_mark == TRUE) %>%
-    mutate(group_id = cumsum(1 - saturday)) %>%
-    group_by_at(vars(- {{ agg_field }}, 
-                     - {{ date_field }},
-                     -saturday_mark,
-                     -saturday,
-                     -sunday_mark,
-                     -sunday)) %>%
-    summarise({{ date_field }} := min({{ date_field }}),
-              aggregated_saturday_data = sum({{ agg_field }}),
-              .groups = "keep") %>%
-    ungroup() %>%
-    dplyr::select(-group_id)
-  
+  remove_vars_from_grouping <- c(rlang::as_name(enquo(agg_field)), 
+                                 rlang::as_name(enquo(date_field)), 
+                                 "sunday_mark", "sunday")
+    
   monday_data <- weekend_data %>%
     mutate(group_id = cumsum(sunday)) %>%
     filter(sunday_mark == TRUE) %>%
-    group_by_at(vars(- {{ agg_field }}, 
-                     - {{ date_field }},
-                     -saturday_mark,
-                     -saturday,
-                     -sunday_mark,
-                     -sunday)) %>%
+    group_by(across(-all_of(remove_vars_from_grouping))) %>%
     summarise({{ date_field }} := max({{ date_field }}),
               aggregated_sunday_data = sum({{ agg_field }}),
-              .groups = "keep") %>%
-    ungroup() %>%
+              .groups = "drop") %>%
     dplyr::select(-group_id)
   
   data <- data %>%
-    left_join(friday_data, 
-              by = intersect(names(.), names(friday_data))) %>%
     left_join(monday_data, 
               by = intersect(names(.), names(monday_data))) %>%
     mutate({{ agg_field }} := case_when(wday({{ date_field }}) %in% c(1, 7) ~ 0,
-                                        !is.na(aggregated_saturday_data) ~ aggregated_saturday_data,
                                         !is.na(aggregated_sunday_data) ~ aggregated_sunday_data,
                                         TRUE ~ {{ agg_field }})) %>%
-    dplyr::select(-aggregated_saturday_data, -aggregated_sunday_data)
+    dplyr::select(!c(aggregated_sunday_data))
   
   return(data)
 }
@@ -192,6 +180,7 @@ weekends_to_nearest_work_day <- function(data, date_field, agg_field) {
 #'   days note, function assumes weekend deaths are 0
 bank_hols_to_nearest_work_day <- function(data, bank_holidays, date_field, agg_field) {
   easter_fridays <- calc_easter_fridays(bank_holidays)
+  
   
   non_easter_holidays <- bank_holidays[!(bank_holidays %in% c(easter_fridays, (easter_fridays + 3)))]
   
@@ -209,8 +198,7 @@ bank_hols_to_nearest_work_day <- function(data, bank_holidays, date_field, agg_f
                      -late_easter_group)) %>%
     summarise({{ date_field }} := min({{ date_field }}),
               aggregated_early_easter_data = sum({{ agg_field }}),
-              .groups = "keep") %>%
-    ungroup() %>%
+              .groups = "drop") %>%
     dplyr::select(-group_id)
   
   late_easter_data <- easter_data %>%
@@ -222,15 +210,14 @@ bank_hols_to_nearest_work_day <- function(data, bank_holidays, date_field, agg_f
                      -late_easter_group)) %>%
     summarise({{ date_field }} := max({{ date_field }}),
               aggregated_late_easter_data = sum({{ agg_field }}),
-              .groups = "keep") %>%
-    ungroup() %>%
+              .groups = "drop") %>%
     dplyr::select(-group_id)
   
   any_non_easter_bhols <- any(non_easter_holidays %in% pull(data, {{ date_field }}))
   if (any_non_easter_bhols) {
-    friday_bhols <- non_easter_holidays[wday(non_easter_holidays) == 6 & 
+    friday_bhols <- non_easter_holidays[wday(non_easter_holidays) == 6  & 
                                           month(non_easter_holidays) != 12]
-    monday_bhols <- non_easter_holidays[wday(non_easter_holidays) == 2 & 
+    monday_bhols <- non_easter_holidays[wday(non_easter_holidays) == 2  & 
                                           month(non_easter_holidays) != 12]
     other_bhols <- non_easter_holidays[!(non_easter_holidays %in% c(friday_bhols, monday_bhols))]
     
@@ -256,8 +243,7 @@ bank_hols_to_nearest_work_day <- function(data, bank_holidays, date_field, agg_f
                          -mark_group)) %>%
         summarise({{ date_field }} := min({{ date_field }}),
                   aggregated_bh_data = sum({{ agg_field }}),
-                  .groups = "keep") %>%
-        ungroup() %>%
+                  .groups = "drop") %>%
         dplyr::select(-group_id)
       
       bank_hol_data <- bind_rows(bank_hol_data,
@@ -285,8 +271,7 @@ bank_hols_to_nearest_work_day <- function(data, bank_holidays, date_field, agg_f
                          -mark_group)) %>%
         summarise({{ date_field }} := max({{ date_field }}),
                   aggregated_bh_data = sum({{ agg_field }}),
-                  .groups = "keep") %>%
-        ungroup() %>%
+                  .groups = "drop") %>%
         dplyr::select(-group_id)
       
       bank_hol_data <- bind_rows(bank_hol_data,
@@ -314,8 +299,7 @@ bank_hols_to_nearest_work_day <- function(data, bank_holidays, date_field, agg_f
                        -mark_group)) %>%
       summarise({{ date_field }} := min({{ date_field }}),
                 aggregated_bh_data = sum({{ agg_field }}),
-                .groups = "keep") %>%
-      ungroup() %>%
+                .groups = "drop") %>%
       dplyr::select(-group_id)
 
       bank_hol_data <- bind_rows(bank_hol_data,
@@ -450,7 +434,8 @@ rgn_lookup <- function() {
 preprocess_deaths <- function(data, date_field, death_field, sex_field, age_group_field, holidays) {
   
   data <- data %>%
-    weekends_to_nearest_work_day(date_field = {{ date_field }}, agg_field = {{ death_field }}) %>%
+    weekends_to_nearest_work_day(date_field = {{ date_field }}, 
+                                 agg_field = {{ death_field }}) %>%
     bank_hols_to_nearest_work_day(bank_holidays = holidays, 
                                   date_field = {{ date_field }},
                                   agg_field = {{ death_field }}) %>%
@@ -458,10 +443,7 @@ preprocess_deaths <- function(data, date_field, death_field, sex_field, age_grou
            !({{ date_field }} %in% holidays),
            Sex != 3) %>%
     mutate(day = wday({{ date_field }}), 
-           # year = year({{ date_field }}), 
-           ### add binary variables for days either side of Easter
-           month = floor_date({{ date_field }}, unit = "month"), 
-           years_from_20161231 = as.numeric({{ date_field }} - as.Date("2016-12-31")) / 365.25) %>%
+           month = floor_date({{ date_field }}, unit = "month")) %>%
     sex_change_0_1({{ sex_field }}) %>%
     mutate(years_from_20161231 = as.numeric({{ date_field }} - as.Date("2016-12-31")) / 365.25,
            {{ age_group_field }} := factor({{ age_group_field }})) %>% 
@@ -499,6 +481,18 @@ add_prediction_intervals <- function(data, modelled_field, dispersion_parameter)
   
   data <- data %>%
     mutate(random_total = map({{ modelled_field }}, ~rqpois(5000, .x, dispersion_parameter)),
+           lpb = map_dbl(random_total, ~quantile(.x, 0.00135)),
+           upb = map_dbl(random_total, ~quantile(.x, 0.99865))) %>%
+    dplyr::select(-random_total)
+  return(data)
+}
+
+add_prediction_intervals_tibble <- function(data, modelled_field, dispersion_parameter) {
+  data <- data %>%
+    mutate({{ dispersion_parameter }} := case_when(
+              {{ dispersion_parameter }} < 1 ~ 1,
+              TRUE ~ {{ dispersion_parameter }}),
+           random_total = map({{ modelled_field }}, ~rqpois(5000, .x, {{ dispersion_parameter }})),
            lpb = map_dbl(random_total, ~quantile(.x, 0.00135)),
            upb = map_dbl(random_total, ~quantile(.x, 0.99865))) %>%
     dplyr::select(-random_total)
@@ -643,6 +637,11 @@ generate_file_name <- function(model_filename,
   if (!is.null(age_filter)) model_filename <- paste(model_filename,
                                                     paste(age_filter, collapse = "_"),
                                                     sep = "_")
+  
+  model_filename  <- paste(model_filename,
+                           "ons_aligned_weekly",
+                           sep = "_")
+  
   filename <- paste0(directory,
                      "/",
                      model_filename,
@@ -672,7 +671,7 @@ ethnic_groups_lookup <- function() {
 #' @inheritParams create_baseline
 #' @inheritParams generate_visualisations
 #' @param utla_lkp a tibble lookup table for utla to region (see utla_lookup())
-build_recent_dates <- function(area_codes, from_date, to_date, holidays, denominators, utla_lkp, ethnicity, deprivation, 
+build_recent_dates <- function(area_codes, from_date, to_date, holidays, denominators, utla_lkp, eth_dep, 
                                age_filter = NULL, age_group_type = "original") {
   utlas <- utla_lkp %>%
     filter(!(UTLAApr19CD %in% c("E06000053", "E09000001"))) %>%
@@ -695,21 +694,15 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
     filter(!(wday(date) %in% c(1, 7)),
            !(date %in% holidays)) 
   
-  if (ethnicity == TRUE | deprivation == TRUE) {
+  if (eth_dep == TRUE) {
     recent_dates <- recent_dates %>%
-      merge(y = data.frame(RGN09CD = area_codes, stringsAsFactors = FALSE))
-    if (ethnicity == TRUE) {
-      recent_dates <- recent_dates %>%
-        merge(y = data.frame(Ethnic_Group = factor(c("Asian", "Black", "Mixed", "Other", "White"))))  
-    }
+      merge(y = data.frame(RGN09CD = area_codes, stringsAsFactors = FALSE)) %>%
+      merge(y = data.frame(Ethnic_Group = factor(c("Asian", "Black", "Mixed", "Other", "White")))) %>%
+      merge(y = data.frame(Deprivation_Quintile = factor(1:5)))
     
-    if (deprivation == TRUE){
-      recent_dates <- recent_dates %>%
-        merge(y = data.frame(Deprivation_Quintile = factor(1:5)))
-    } 
   } else {
-      recent_dates <- recent_dates %>%
-        merge(y = data.frame(UTLAApr19CD = utlas, stringsAsFactors = FALSE))
+    recent_dates <- recent_dates %>%
+      merge(y = data.frame(UTLAApr19CD = utlas, stringsAsFactors = FALSE))
   }
   
   recent_dates <- recent_dates  %>%
@@ -719,22 +712,14 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
            month = floor_date(date, unit = "month"), 
            years_from_20161231 = as.numeric(date - as.Date("2016-12-31")) / 365.25)
   
-  if (ethnicity == TRUE) {
-    if (deprivation == TRUE) {
-      recent_dates <- recent_dates %>%
-        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "month"))  
-    } else {
-      recent_dates <- recent_dates %>%
-        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Sex", "Age_Group", "month"))  
-    }
+  if (eth_dep == TRUE) {
+    recent_dates <- recent_dates %>%
+      left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "month"))  
+    
   } else {
-    if (deprivation == TRUE) {
-      recent_dates <- recent_dates %>%
-        left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Deprivation_Quintile", "Sex", "Age_Group", "month"))
-    } else if (deprivation == FALSE) {
-      recent_dates <- recent_dates %>%
-        left_join(denominators, by = c("UTLAApr19CD" = "OfficialCode", "Sex", "Age_Group", "month"))
-    }
+    recent_dates <- recent_dates %>%
+      left_join(denominators, by = c("UTLAApr19CD" = "OfficialCode", "Sex", "Age_Group", "month"))
+    
     
   }
   recent_dates <- recent_dates %>%
@@ -762,56 +747,16 @@ build_recent_dates <- function(area_codes, from_date, to_date, holidays, denomin
     dplyr::select(-day) %>%
     ungroup()
   
-  ## add zeros in missing fields (ie, because the month hasn't occurred in the recent_dates object)
-  if (ethnicity == TRUE) {
-    if (deprivation == TRUE) {
-      expected_names <- c("date", "RGN09CD", "Ethnic_Group", "Deprivation_Quintile", "Sex", 
-                          "Age_Group", "deaths_total", 
-                          "years_from_20161231", "denominator", #"year", 
-                          "WedpreE", "ThurpreE", "TuespostE", 
-                          "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
-                          "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
-                          paste0("month", 1:12), 
-                          paste0("day", 1:5))
-    } else {
-      expected_names <- c("date", "RGN09CD", "Ethnic_Group", "Sex", 
-                          "Age_Group", "deaths_total", 
-                          "years_from_20161231", "denominator", #"year", 
-                          "WedpreE", "ThurpreE", "TuespostE", 
-                          "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
-                          "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
-                          paste0("month", 1:12), 
-                          paste0("day", 1:5))
-      
-    }
-  } else {
-    if (deprivation == TRUE) {
-      expected_names <- c("date", "RGN09CD", "Deprivation_Quintile", "Sex", 
-                          "Age_Group", "deaths_total",  
-                          "years_from_20161231", "denominator", #"year", 
-                          "WedpreE", "ThurpreE", "TuespostE", 
-                          "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
-                          "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
-                          paste0("month", 1:12), 
-                          paste0("day", 1:5))
-    } else if (deprivation == FALSE) {
-      expected_names <- c("date", "UTLAApr19CD", "Sex", 
-                          "Age_Group", "deaths_total",  
-                          "years_from_20161231", "denominator", #"year", 
-                          "WedpreE", "ThurpreE", "TuespostE", 
-                          "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
-                          "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD",
-                          paste0("month", 1:12), 
-                          paste0("day", 1:5))
-    }
-    
-  }
   
+  recent_dates <- recent_dates %>% 
+    mutate(deaths_total = NA) %>% 
+    convert_to_weekly_for_modelling(from_date = from_date,
+                                    to_date = to_date)  
   
-  missing_fields <- setdiff(expected_names,
+  expected_months <- paste0("month", 1:12)
+  missing_months <- setdiff(expected_months,
                             names(recent_dates))
-  
-  recent_dates[missing_fields] <- 0
+  recent_dates[missing_months] <- 0
   return(recent_dates)
 }
 
@@ -917,40 +862,12 @@ transform_regions <- function(data, region_field) {
   return(data)
 }
 
-#' @description apply comparability ratios to different disease groups
-#' @param data data from that includes a deaths field
-#' @param disease_name string; the disease name used in the comparability ratios
-#'   Excel lookup table
-apply_comparability_ratios <- function(data, disease_name) {
-  age_group_expand <- age_group_lkp() %>%
-    mutate(Agegroup = case_when(
-      Age < 75 ~ "<75",
-      TRUE ~ "75+"
-    )) %>%
-    distinct(Age_Group, Agegroup)
-
-  comparability_ratios <- read_xlsx("data/MUSE comparability ratios v2.xlsx",
-                                    sheet = "Final",
-                                    skip = 2) %>%
-    filter(`Cause of death` == disease_name) %>%
-    left_join(age_group_expand, by = "Agegroup") %>%
-    dplyr::select(-Agegroup, -`Cause of death`)
-  
-  data <- data %>%
-    left_join(comparability_ratios, by = c("Age_Group", "Sex")) %>%
-    mutate(deaths_total = deaths_total * `Comparability ratio`) %>%
-    dplyr::select(-`Comparability ratio`)
-  
-  return(data)
-  
-  
-}
-
 #' @description a cause code to disease lookup table
 #' @param cause_name character vector to filter output with
 #' @param table_output logical; FALSE returns vector of ICD codes, TRUE returns
 #'   a table with cause_name and ICD codes
-cause_code_lookup <- function(cause_name = NULL, table_output = FALSE) {
+cause_code_lookup <- function(cause_name = NULL, table_output = FALSE,
+                              include_epi_hf = FALSE) {
   ihd_codes <- paste0("I", 20:25)
   cereberovascular_codes <- paste0("I", 60:69)
   other_circulatory_codes <- paste0("I", formatC(0:99, width = 2, flag = "0"))
@@ -966,6 +883,8 @@ cause_code_lookup <- function(cause_name = NULL, table_output = FALSE) {
   urinary_system_codes <- paste0("N", formatC(0:39, width = 2, flag = "0"))
   cirrhosis_liver_codes <- paste0("K", 70:76)
   parkinsons_codes <- "G20"
+  diabetes_codes <- paste0("E", 10:14)
+  
   covid_codes <- c("U07")
   
   
@@ -986,9 +905,18 @@ cause_code_lookup <- function(cause_name = NULL, table_output = FALSE) {
              ICD_codes %in% urinary_system_codes ~ "diseases of the urinary system",
              ICD_codes %in% cirrhosis_liver_codes ~ "cirrhosis and other liver diseases",
              ICD_codes %in% parkinsons_codes ~ "Parkinson's disease",
+             ICD_codes %in% diabetes_codes ~ "diabetes",
              ICD_codes %in% covid_codes ~ "COVID-19",
              TRUE ~ "All other causes (excl. COVID-19)"
            ))
+  
+  if (include_epi_hf == TRUE) {
+    additional_codes <- read.csv("data/additional_icd_codes.csv")
+    
+    cause_codes <- cause_codes %>% 
+      filter(name_of_cause != "All other causes (excl. COVID-19)") %>% 
+      bind_rows(additional_codes)
+  }
   
   if (table_output == TRUE) {
     return(cause_codes)
@@ -1012,44 +940,14 @@ filename_model_to_dispersion <- function(model_filename) {
   return(disp_par_filename) 
 }
 
-#' @description lookup table for models used and diseases/place of death to
-#'   ensure consistency in predictions and visualisations at England and
-#'   regional level
-model_references <- function() {
-  references <- tibble::tribble(
-    ~reference,                                                   ~model_file,                                                                                   ~caption,
-    NA,                                                        "model_outputs\\glm_all_utlas_dm_20200522.rds",                                                 "ICD10 reference: All mentions of E10-E14",
-    NA,                                                        "model_outputs\\glm_all_utlas_ari_mentions_20200522.rds",                                       "ICD10 reference: All mentions of J00-J22",
-    NA,                                                        "model_outputs\\glm_all_utlas_dementia_mentions_20200522.rds",                                  "ICD10 reference: All mentions of F01, F03 and G30",
-    "All other causes (excl. COVID-19)",                       "model_outputs\\glm_all_utlas_all_other_20200522.rds",                                          "ICD10 reference: All other underlying causes of death (excluding COVID-19)",
-    "Parkinson's disease",                                     "model_outputs\\20200626_parkinsons.rds",                                         "ICD10 reference: Underlying cause of death is G20",
-    "cirrhosis and other liver diseases",                      "model_outputs\\20200626_cirrhosis_liver.rds",                                    "ICD10 reference: Underlying cause of death is between K70-K76",
-    "diseases of the urinary system",                          "model_outputs\\20200626_urinary_system.rds",                                     "ICD10 reference: Underlying cause of death is between N00-N39",
-    "dementia and Alzheimer's",                                "model_outputs\\glm_all_utlas_dementia_20200522.rds",                                           "ICD10 reference: Underlying cause of death is F01, F03 or G30",
-    "other respiratory diseases",                              "model_outputs\\20200626_other_respiratory.rds",                                  "ICD10 reference: Underlying cause of death begins with J (excluding J00-J22 and J40-J47)",
-    "chronic lower respiratory diseases",                      "model_outputs\\20200626_clr.rds",                                                "ICD10 reference: Underlying cause of death J40-J47",
-    "acute respiratory infections",                            "model_outputs\\20200626_ari.rds",                                                "ICD10 reference: Underlying cause of death J00-J22",
-    "cancer",                                                  "model_outputs\\glm_all_utlas_cancer_20200522.rds",                                             "ICD10 reference: Underlying cause of death C00-C97",
-    "other circulatory diseases",                              "model_outputs\\glm_all_utlas_other_circulatory_20200522.rds",                                  "ICD10 reference: Underlying cause of death begins with I (excluding I20-I25 and I60-I69)",
-    "cerebrovascular diseases",                                "model_outputs\\20200626_cerebrovascular.rds",                                              "ICD10 reference: Underlying cause of death I60-I69",
-    "ischaemic heart diseases",                                "model_outputs\\20200626_ihd.rds",                                                "ICD10 reference: Underlying cause of death I20-I25",
-    "Other places",                                            "model_outputs\\glm_all_utlas_other_places_20200522.rds",                                       "",
-    "Hospice",                                                 "model_outputs\\glm_all_utlas_hospice_20200522.rds",                                            "",
-    "Hospital (acute or community, not psychiatric)",          "model_outputs\\glm_all_utlas_hospital_20200522.rds",                                           "",
-    "Care home (nursing or residential)",                      "model_outputs\\glm_all_utlas_care_home_20200522.rds",                                          "",
-    "Home",                                                    "model_outputs\\glm_all_utlas_home_20200522.rds",                                               ""
-  )
-  
-  
-  return(references)
-}
+
 
 #' @description check to ensure visualisation_geography used is within range for
 #'   given combination of ethnicity and deprivation (as models are built at
 #'   different geographies)
 #' @inheritParams generate_visualisations
-vis_geography_variable <- function(visualisation_geography, ethnicity, deprivation) {
-  if (ethnicity == FALSE & deprivation == FALSE) {
+vis_geography_variable <- function(visualisation_geography, eth_dep) {
+  if (!eth_dep == TRUE) {
     if (!(visualisation_geography %in% c("region", "england"))) stop("visualisation_geography must be either region, england")
   } else {
     if (!(visualisation_geography %in% c("utla", "region", "england"))) stop("visualisation_geography must be either utla, region, england")
@@ -1058,7 +956,7 @@ vis_geography_variable <- function(visualisation_geography, ethnicity, deprivati
   if (visualisation_geography == "utla") {
     return("UTLAApr19CD")
   } else if (visualisation_geography == "region") {
-    return("RGN09CD") # currently deprivation is RGN09CD and ethnicity is RGN09NM
+    return("RGN09CD") 
   } else {
     return(NULL)
   }
@@ -1066,15 +964,15 @@ vis_geography_variable <- function(visualisation_geography, ethnicity, deprivati
 
 #' @description check to ensure facet_variables entered is within possible range
 #' @inheritParams generate_visualisations
-facet_variables <- function(facet_fields = NULL, ethnicity, deprivation) {
+facet_variables <- function(facet_fields = NULL, eth_dep) {
   if (is.null(facet_fields)) return(NULL)
   
   # if (!(names(facet_fields) %in% c("x", "y"))) stop("names of facet_fields must be x or y")
   
-  if ("Ethnic_Group" %in% facet_fields & ethnicity == FALSE) 
+  if ("Ethnic_Group" %in% facet_fields & eth_dep == FALSE) 
     stop("ethnicity must be equal to TRUE if Ethnic_Group one of facet_fields items")
   
-  if ("Deprivation_Quintile" %in% facet_fields & deprivation == FALSE) 
+  if ("Deprivation_Quintile" %in% facet_fields & eth_dep == FALSE) 
     stop("deprivation must be equal to TRUE if Deprivation_Quintile is one of facet_fields items")
   
   if (!(any(facet_fields %in% c("Deprivation_Quintile", "Ethnic_Group", "Sex", "Age_Group", "RGN09CD", "UTLAApr19CD", "POD_out", "name_of_cause"))))
@@ -1092,8 +990,9 @@ split_chart_variables <- function(field, grouping_fields) {
 }
 
 #' @description export data ready for using in PowerBI
-export_powerbi_data <- function(data, grouping_fields, model_filename, end_date,
-                                directory = Sys.getenv("POWERBI_FILESHARE"), age_filter = NULL) {
+export_powerbi_data <- function(data, grouping_fields, model_filename, from_date, end_date,
+                                directory = Sys.getenv("POWERBI_FILESHARE"), age_filter = NULL,
+                                breakdown_by_ucod = FALSE) {
   # create directory if it doesn't exist already
   dir.create(directory, showWarnings = FALSE)
   
@@ -1105,10 +1004,11 @@ export_powerbi_data <- function(data, grouping_fields, model_filename, end_date,
     }
   }
   
+  
   grouping_fields_without_date <- grouping_fields[grouping_fields != "date"]
   grouping_fields_without_date_with_weekid <- c(grouping_fields_without_date, "weekid")
   
-  all_dates <- tibble(date = seq(from = min(data$date),
+  all_dates <- tibble(date = seq(from = from_date,
                                  to = max(data$date),
                                  by = "days"))
   
@@ -1124,39 +1024,51 @@ export_powerbi_data <- function(data, grouping_fields, model_filename, end_date,
       
   }
   
+  week_end <- 7
+  
   data <- data %>% 
     full_join(all_dates, by = intersect(names(.), names(all_dates))) %>% 
     arrange(across(all_of(grouping_fields))) %>% 
-    mutate(sun = wday(date) == 1,
-           weekid = cumsum(sun)) %>% 
+    mutate(last_day = wday(date) == week_end,
+           weekid = cumsum(last_day)) %>% 
     ungroup() %>% 
-    group_by(across(all_of(c(grouping_fields_without_date_with_weekid, "weekid")))) %>% 
-    summarise(date = max(date),
-              registered = sum(registered_count, na.rm = TRUE),
-              expected = sum(modelled_deaths_zeros, na.rm = TRUE),
-              covid = sum(deaths_total, na.rm = TRUE),
-              days_in_week = n(),
-              .groups = "keep") %>% 
-    ungroup() %>% 
+    group_by(across(all_of(c(grouping_fields_without_date_with_weekid, "weekid"))))
+  
+  if (breakdown_by_ucod == TRUE) {
+    data <- data %>% 
+      summarise(date = max(date),
+                registered = sum(registered_count, na.rm = TRUE),
+                expected = sum(modelled_deaths_zeros, na.rm = TRUE),
+                ucod_covid = sum(deaths_total, na.rm = TRUE),
+                ucod_disease = sum(ucod_disease, na.rm = TRUE),
+                days_in_week = n(),
+                .groups = "drop")
+  } else if (breakdown_by_ucod == FALSE) {
+    data <- data %>%
+      summarise(date = max(date),
+                registered = sum(registered_count, na.rm = TRUE),
+                expected = sum(modelled_deaths_zeros, na.rm = TRUE),
+                covid = sum(deaths_total, na.rm = TRUE),
+                days_in_week = n(),
+                .groups = "drop")
+  }
+  data <- data %>%
     filter(date <= end_date) %>% 
-    dplyr::select(-weekid) %>% 
-    mutate(date = date - 1)
-  
-  
+    dplyr::select(-weekid)
   
   if (!is.null(age_filter)) {
     filename <- paste0(directory, "/", model_filename,
-                       "_",
                        paste(grouping_fields_without_date, collapse = "_"),
                        "_",
-                       paste(age_filter, collapse = "_"),
-                       ".csv")
+                       paste(age_filter, collapse = "_"))
   } else {
     filename <- paste0(directory, "/", model_filename,
-                       paste(grouping_fields_without_date, collapse = "_"),
-                       ".csv")
+                       paste(grouping_fields_without_date, collapse = "_"))
   }
   
+  filename  <- paste(filename,
+                     "ons_aligned_weekly.csv",
+                     sep = "_")
   write.csv(data, 
             filename,
             row.names = FALSE)
@@ -1217,7 +1129,7 @@ transform_nomis_ages <- function(data, age_field, LSOA_field, pop_field) {
     distinct(Age_Group_Nomis, Age_Group)
   
   age_gp_lkp_older <- age_group_lkp(type = "original")
-  
+  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/adhocs/008781populationdenominatorsbybroadethnicgroupandforwhitebritishlocalauthoritiesinenglandandwales2011to2017
   pops_url <- "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/populationandmigration/populationestimates/adhocs/008781populationdenominatorsbybroadethnicgroupandforwhitebritishlocalauthoritiesinenglandandwales2011to2017/localdenominators2019.xls"
   GET(pops_url, write_disk(tf <- tempfile(fileext = ".xls")))
   
@@ -1275,74 +1187,1144 @@ transform_nomis_ages <- function(data, age_field, LSOA_field, pop_field) {
 }
 
 
-cabinet_office_data_feed <- function() {
+collate_powerbi_files <- function(remove_expected_registered = FALSE, 
+                                  geography = c("england", "region")) {
+  
+  # check geography argument
+  geography <- match.arg(geography)
+  
+  # create strings to find correct file names
+  rgn_part_suffix <- ""
+  rgn_part_prefix <- ""
+  if (geography == "region") {
+    rgn_part_suffix <- "_RGN09CD"
+    rgn_part_prefix <- "RGN09CD_"
+  }
+  
   folder_path <- Sys.getenv("POWERBI_FILESHARE")
   
-  ucods <- read.csv(paste0(folder_path, "/name_of_cause.csv")) %>% 
-    mutate(underlying_or_mention = "underlying")
+  suffix <- "_ons_aligned_weekly"
   
-  dm <- read.csv(paste0(folder_path, "/glm_all_utlas_dm_20200522.csv")) %>% 
-    mutate(name_of_cause = "diabetes mellitus",
-           underlying_or_mention = "mention")
-  ari <- read.csv(paste0(folder_path, "/glm_all_utlas_ari_mentions_20200522.csv")) %>% 
-    mutate(name_of_cause = "acute respiratory infections",
-           underlying_or_mention = "mention")
-  dm <- read.csv(paste0(folder_path, "/glm_all_utlas_dementia_mentions_20200522.csv")) %>% 
-    mutate(name_of_cause = "dementia",
-           underlying_or_mention = "mention")
+  combined_models <- tibble(
+    reference = c("Place of death"),
+    prediction_file = c("POD_out")
+  )
   
-  final <- bind_rows(ucods,
-                     dm, 
-                     ari,
-                     dm) %>% 
-    mutate(name_of_cause = tools::toTitleCase(name_of_cause)) %>% 
-    rename(week_ending = date) %>% 
-    dplyr::relocate(underlying_or_mention) %>% 
-    filter(days_in_week == 7) %>% 
-    dplyr::select(!c(covid, days_in_week))
+  # create regex strings to remove from filenames depending on geography
+  if (geography == "england") {
+    filter_string_pattern <- "UCOD$|POD$|UTLA|Ethnicity-deprivation"
+  } else if (geography == "region") {
+    filter_string_pattern <- "UCOD$|POD$|Ethnicity-deprivation|England"
+  }
   
-  filepath <- paste0(folder_path, "/causes_of_death_for_cabinet_office.csv")
-  write.csv(final,
-            filepath,
-            row.names = FALSE)
-  
-  return(filepath)
-}
-
-collate_powerbi_files <- function(remove_expected_registered = FALSE) {
-  folder_path <- Sys.getenv("POWERBI_FILESHARE")
-  
-  file_references <- read.csv("data/powerbi_references.csv") %>% 
-    mutate(powerbi_file = paste0(folder_path, "/", powerbi_file, ".csv")) %>% 
+  # create named vector of filenames where individual powerbi files are stored
+  file_references <- all_models() %>%
+    filter(!grepl(filter_string_pattern, reference)) %>%
+    bind_rows(combined_models) %>%
+    mutate(powerbi = case_when(
+      grepl("POD_out|name_of_cause", prediction_file) ~ paste0(rgn_part_prefix,
+                                                               prediction_file),
+      TRUE ~ paste0(prediction_file,
+                    rgn_part_suffix)),
+           powerbi = case_when(
+      grepl("Region", reference) & geography == "england" ~ paste(powerbi, "RGN09CD", sep = "_"),
+      grepl("Age-Sex", reference) ~ paste(powerbi, "Age_Group_Sex", sep = "_"),
+      grepl("Deprivation", reference) ~ paste(powerbi, "Deprivation_Quintile", sep = "_"),
+      grepl("Ethnicity-Sex", reference) ~ paste(powerbi, "Ethnic_Group_Sex", sep = "_"),
+      grepl("UTLA", reference) ~ paste(powerbi, "UTLAApr19CD", sep = "_"),
+      TRUE ~ powerbi),
+           powerbi = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                            "/",
+                            powerbi, 
+                            suffix,
+                            ".csv")) %>%
+    dplyr::select(-prediction_file) %>%
     tibble::deframe()
-  
-  collated_output <- lapply(file_references, read.csv) %>% 
-    bind_rows(.id = "Chart_Name") %>% 
-    filter(days_in_week == 7) %>% 
+
+  # read in and collate the powerbi files
+  # do some formatting and tidying up
+  collated_output <- lapply(file_references, read.csv) %>%
+    bind_rows(.id = "Chart_Name") %>%
+    filter(days_in_week == 7) %>%
     mutate(excess_deaths = round_correct(registered - expected, 0),
            ratio = round_correct(registered / expected, 2),
            name_of_cause = case_when(
              grepl("mentions", Chart_Name) ~ Chart_Name,
-             TRUE ~ name_of_cause),
+             TRUE ~ NA_character_),
+           name_of_cause = capitalise_first_letter(name_of_cause),
            Chart_Name = case_when(
              grepl("mentions", Chart_Name) ~ "Mention of cause of death",
-             TRUE ~ Chart_Name)) %>% 
-    dplyr::select(!c(days_in_week)) %>% 
+             TRUE ~ Chart_Name)) %>%
+    dplyr::select(!c(days_in_week)) %>%
     rename(Place_of_Death = POD_out,
            Week_End = date,
            Mention_of_Covid = covid,
            Cause_Name = name_of_cause,
-           Region_Code = RGN09CD)
+           Region_Code = RGN09CD) %>% 
+    relocate(registered, expected, Mention_of_Covid,
+             .before = excess_deaths) %>% 
+    rename(Registered = registered,
+           Expected = expected,
+           Excess_Deaths = excess_deaths)
+
+  if (geography == "region") {
+    # regional reports don't present weekly data, so this section aggregates appropriately
+    chart_variables <- setdiff(names(collated_output),
+                               c("Week_End", "ratio", 
+                                 "Registered", "Expected",
+                                 "Mention_of_Covid", "Excess_Deaths",
+                                 "ucod_covid", "ucod_disease"))
+    
+    collated_output <- collated_output %>% 
+      mutate(Week_End = as.Date(Week_End))
+    
+    dps <- obtain_dispersion_parameters() %>% 
+      mutate(Chart_Name = capitalise_first_letter(Chart_Name))
+    
+    cumulative_output <- collated_output %>% 
+      filter(Chart_Name != "Region") %>% 
+      group_by(across(all_of(chart_variables))) %>% 
+      summarise(Period_Start = range(Week_End)[1] - 6,
+                Period_End = range(Week_End)[2],
+                Registered = sum(Registered),
+                Expected = sum(Expected),
+                Mention_of_Covid = sum(Mention_of_Covid),
+                Excess_Deaths = Registered - Expected,
+                ucod_covid = sum(ucod_covid),
+                ucod_disease = sum(ucod_disease),
+                .groups = "keep") %>% 
+      mutate(ratio = round_correct(Registered / Expected, 2),
+             across(all_of(c("Registered", "Expected", 
+                             "Mention_of_Covid", "Excess_Deaths")),
+                    round_correct, n = 0),
+             Cause_Name = str_remove(Cause_Name, "^All "),
+             Cause_Name = capitalise_first_letter(Cause_Name),
+             join_field = case_when(
+               !is.na(Cause_Name) ~ Cause_Name,
+               !is.na(Place_of_Death) ~ Place_of_Death,
+               TRUE ~ Chart_Name)) %>% 
+      left_join(dps, by = c("join_field" = "Chart_Name")) %>% 
+      add_prediction_intervals_tibble(modelled_field = Expected,
+                                      dispersion_parameter = Dispersion_Parameter) %>% 
+      mutate(ratio = case_when(
+        Registered > upb | Registered < lpb ~ ratio,
+        TRUE ~ NA_real_)) %>% 
+      dplyr::select(!c(Dispersion_Parameter, join_field, upb, lpb))
+    
+    collated_output <- collated_output %>% 
+      filter(Chart_Name == "Region") %>% 
+      rename(
+        "Period_End" = Week_End
+      ) %>% 
+      mutate(Period_Start = Period_End - 6) %>% 
+      bind_rows(cumulative_output) %>% 
+      rename(
+        "Underlying_cause_covid" = ucod_covid,
+        "Underlying_cause_disease" = ucod_disease
+      ) %>%
+      relocate(Period_Start, 
+               .before = Period_End)
+  }
   
   if (remove_expected_registered == TRUE) {
-    collated_output <- collated_output %>% 
-      dplyr::select(!c(registered, expected))
+    collated_output <- collated_output %>%
+      dplyr::select(!c(Registered, Expected))
   }
-    
-  filepath <- paste0(folder_path, "/weekly_chart_data.csv")
-  write.csv(collated_output,
-            filepath,
-            row.names = FALSE)
-  return(filepath)
+
+  # write to excel and csv, returns filepath
+  write_data_server(
+    geography = geography, 
+    data = collated_output,
+    folder_path = folder_path
+  )
   
 }
+
+obtain_dispersion_parameters <- function() {
+  folder_path <- Sys.getenv("DISPERSION_PARAMETERS_FILESHARE")
+  
+  file_references <- all_models() %>% 
+    mutate(prediction_file = paste0(folder_path, "/", prediction_file, ".txt")) %>% 
+    tibble::deframe()
+  
+  collated_output <- lapply(file_references, readLines) %>% 
+    bind_rows(.id = "Chart_Name")
+  
+  dispersion_parameters <- t(collated_output) %>% 
+    data.frame() %>% 
+    rename(Dispersion_Parameter = ".") %>% 
+    tibble::rownames_to_column(var = "Chart_Name") %>% 
+    mutate(Chart_Name = gsub(" POD| UCOD", "", Chart_Name),
+           Dispersion_Parameter = as.numeric(Dispersion_Parameter))
+  
+  return(dispersion_parameters)
+}
+
+all_models <- function(model_name = NULL) {
+  
+  model_refs <- tibble::tribble(
+    ~reference,                                                                          ~prediction_file,
+    # "ARI mentions",                                                                "20210113_ari_mentions",
+    # "Dementia mentions",                                                      "20210113_dementia_mentions",
+    # "Other causes (excl. COVID-19) mentions",                                      "20210113_all_other_causes", 
+    # "Epilepsy mentions",                                                      "20210302_epilepsy_mentions", 
+    "Parkinson's disease mentions",                                 "20210302_parkinsons_disease_mentions", 
+    "Diabetes mentions",                                                      "20210113_diabetes_mentions",
+    "Cirrhosis and other liver diseases mentions",  "20210302_cirrhosis_and_other_liver_diseases_mentions", 
+    "Diseases of the urinary system mentions",          "20210302_diseases_of_the_urinary_system_mentions", 
+    "Dementia and Alzheimer's mentions",                       "20210302_dementia_and_alzheimers_mentions", 
+    "Other respiratory diseases mentions",                  "20210302_other_respiratory_diseases_mentions", 
+    "Chronic lower respiratory diseases mentions",  "20210302_chronic_lower_respiratory_diseases_mentions", 
+    "Acute respiratory infections mentions",              "20210302_acute_respiratory_infections_mentions", 
+    "Cancer mentions",                                                          "20210302_cancer_mentions",
+    "Heart failure mentions",                                            "20210302_heart_failure_mentions",
+    "Other circulatory diseases mentions",                  "20210302_other_circulatory_diseases_mentions",
+    "Cerebrovascular diseases mentions",                      "20210302_cerebrovascular_diseases_mentions", 
+    "Ischaemic heart diseases mentions",                      "20210302_ischaemic_heart_diseases_mentions",                  
+    "Other places POD",                                                            "20210113_other_places",
+    "Hospice POD",                                                                      "20210113_hospice",
+    "Hospital (acute or community, not psychiatric) POD",                              "20210113_hospital",
+    "Care home (nursing or residential) POD",                                         "20210113_care_home",
+    "Home POD",                                                                            "20210113_home",
+    "England",                                                                          "20210212_eth_dep",
+    "Region",                                                                           "20210212_eth_dep",
+    "Age-Sex",                                                                          "20210212_eth_dep",
+    "Deprivation",                                                                      "20210212_eth_dep",
+    "Ethnicity-Sex",                                                                    "20210212_eth_dep",
+    "Ethnicity-deprivation",                                                            "20210212_eth_dep",
+    "UTLA",                                                                                "20210113_utla")
+  
+                                                                                
+  
+  
+  
+  
+  if (!is.null(model_name)) {
+    if (!(model_name %in% model_refs$reference)) stop("model_name not in model references")
+    model_refs <- model_refs %>% 
+      filter(reference == model_name) %>% 
+      pull(prediction_file)
+  }
+  return(model_refs)
+}
+
+
+#' @description lookup table for models used and diseases/place of death to
+#'   ensure consistency in predictions and visualisations at England and
+#'   regional level
+model_references <- function() {
+  
+  references <- all_models() %>% 
+    filter(grepl("mentions$|POD$", reference)) %>% 
+    left_join(icd_captions(), by = "reference") %>% 
+    mutate(model_file = paste0("model_outputs\\",
+                               prediction_file, 
+                               ".rds"),
+           reference = case_when(
+             grepl("Other causes \\(excl\\. COVID-19\\)", reference) ~ "All other causes (excl. COVID-19)",
+             TRUE ~ reference),
+           reference = gsub(" mentions$| POD$", "", reference)) %>% 
+    dplyr::select(reference, model_file, caption)
+  
+  return(references)
+}
+
+
+#' @description lookup table for captions for the UCOD, POD and mentions models
+#'   for the weekly charts
+icd_captions <- function(geography = "england") {
+  captions <- tibble::tribble(
+    ~reference,                                                                                   ~caption,
+    "Diabetes mentions",                                                  "ICD10 reference: All mentions of E10-E14",
+    "Parkinson's disease mentions",                                                 "ICD10 reference: All mentions of G20",
+    "Cirrhosis and other liver diseases mentions",                                             "ICD10 reference: All mentions of K70-K76",
+    "Diseases of the urinary system mentions",                                             "ICD10 reference: All mentions of N00-N39",
+    "Dementia and Alzheimer's mentions",                                    "ICD10 reference: All mentions of F01, F03, or G30",
+    "Other respiratory diseases mentions",       "ICD10 reference: All mentions beginning with J (excluding J00-J22 and J40-J47)",
+    "Chronic lower respiratory diseases mentions",                                             "ICD10 reference: All mentions of J40-J47",
+    "Acute respiratory infections mentions",                                             "ICD10 reference: All mentions of J00-J22",
+    "Cancer mentions",                                             "ICD10 reference: All mentions of C00-C97",
+    "Heart failure mentions",                      "ICD10 reference: All mentions of I11.0, I25.5, I42.0, I42.9, I50.0, I50.1, I50.9",
+    "Other circulatory diseases mentions",       "ICD10 reference: All mentions beginning with I (excluding I20-I25 and I60-I69)",
+    "Cerebrovascular diseases mentions",                                             "ICD10 reference: All mentions of I60-I69",
+    "Ischaemic heart diseases mentions",                                             "ICD10 reference: All mentions of I20-I25",
+    "Other places POD",                                                                                         NA,
+    "Hospice POD",                                                                                         NA,
+    "Hospital (acute or community, not psychiatric) POD",                                                                                         NA,
+    "Care home (nursing or residential) POD",                                                                                         NA,
+    "Home POD",                                                                                         NA)  
+  
+    return(captions)
+}
+
+convert_to_weekly_for_modelling <- function(data, from_date, to_date) {
+  # need to make date start on a Monday (Bank Hols, Saturday and Sundays are removed at this point) 
+  first_date <- data %>% 
+    distinct(date) %>% 
+    complete(date = seq(from = from_date,
+                        to = to_date,
+                        by = "days")) %>% 
+    arrange(date) %>% 
+    mutate(day_of_week = wday(date, label = TRUE)) %>% 
+    filter(day_of_week == "Mon") %>% 
+    slice(1) %>% 
+    pull(date)
+  
+  
+  
+  # need to make date finish on a Friday (Bank Hols, Saturday and Sundays are removed at this point) 
+  last_date <- data %>% 
+    distinct(date) %>% 
+    complete(date = seq(from = from_date,
+                        to = to_date,
+                        by = "days")) %>% 
+    arrange(desc(date)) %>% 
+    mutate(day_of_week = wday(date, label = TRUE)) %>% 
+    filter(day_of_week == "Fri") %>% 
+    slice(1) %>% 
+    pull(date)
+  
+  start_day <- 6 # Saturday = day 1 (if not aligned with ONS, deaths on a Saturday are already included in the Friday)
+  
+  negate_names <- c("deaths_total", "years_from_20161231",
+                    "denominator", "WedpreE", "ThurpreE", "TuespostE",
+                    "WedpostE", "ThurpostE", "FripostE", "MonpostE1",
+                    "TuespostE1", "BH_nearest_WD", "BH_next_nearest_WD", "month1",           
+                    "month2", "month3", "month4", "month5",
+                    "month6", "month7", "month8", "month9",
+                    "month10", "month11", "month12", "day1",
+                    "day2", "day3", "day4", "day5")
+  
+  missing_names <- setdiff(negate_names, names(data))
+  
+  # if month fields are missing in build_recent_dates because the recent dates have 
+  # yet to be predicted for certain months, then impute them with a 0
+  if (length(missing_names) > 0) data[, missing_names] <- 0
+  
+  weekly <- data %>% 
+    filter(between(date, first_date, last_date)) %>% 
+    mutate(date = date + (7 - wday(date, week_start = start_day)), # this converts all dates in the week to the Friday date of that week
+           fri_xmas = day(date) == 25 & month(date) == 12,
+           week_after_fri_xmas = day(date - 7) == 25 & month(date - 7) == 12,
+           week2_after_fri_xmas = day(date - 14) == 25 & month(date - 14) == 12) %>% 
+    group_by(across(!all_of(c(negate_names, 
+                              "fri_xmas", "week_after_fri_xmas", "week2_after_fri_xmas")))) %>% 
+    summarise(deaths_total = sum(deaths_total),
+              denominator = sum(denominator),
+              years_from_20161231 = mean(years_from_20161231),
+              month1 = mean(month1),
+              month2 = mean(month2),
+              month3 = mean(month3),
+              month4 = mean(month4),
+              month5 = mean(month5),
+              month6 = mean(month6),
+              month7 = mean(month7),
+              month8 = mean(month8),
+              month9 = mean(month9),
+              month10 = mean(month10),
+              month11 = mean(month11),
+              month12 = mean(month12),
+              easter_pre = max(ThurpreE, na.rm = TRUE),
+              easter_post_1 = max(TuespostE, na.rm = TRUE),
+              easter_post_2 = max(MonpostE1, na.rm = TRUE),
+              wk_nearest_BH = max(BH_nearest_WD, na.rm = TRUE),
+              wk_next_nearest_BH = max(BH_next_nearest_WD, na.rm = TRUE),
+              wk_fri_xmas = max(fri_xmas, na.rm = TRUE),
+              wk_post_fri_xmas = max(week_after_fri_xmas, na.rm = TRUE),
+              wk2_post_fri_xmas = max(week2_after_fri_xmas, na.rm = TRUE),
+              .groups = "drop")
+  
+  return(weekly)
+}
+
+convert_daily_to_weekly <- function(data, fields_for_grouping, date_field, aggregate_field) {
+  start_day <- 6 # Saturday = day 1 (if not aligned with ONS, deaths on a Saturday are already included in the Friday)
+  
+  weekly <- data %>% 
+    complete({{ date_field }} := seq(from = min({{ date_field }}),
+                                    to = max({{ date_field }}),
+                                    by = "days")) %>% 
+    mutate({{ date_field }} := {{ date_field }} + (7 - wday({{ date_field }}, week_start = start_day))) %>% 
+    group_by(across(all_of(fields_for_grouping))) %>% 
+    filter(n() == 7) %>% 
+    summarise({{ aggregate_field }} := sum({{ aggregate_field }}, na.rm = TRUE),
+              .groups = "drop")
+  
+  return(weekly)
+}
+
+capitalise_first_letter <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+
+# consistent preprocessing steps for data processing prior to visualisations
+preprocessing_stages <- function(data, eth_dep, 
+                                 all_pod, ethnicity_proportions,
+                                 deaths_field, bank_holidays, 
+                                 new_deaths_field_name = "registered_count") {
+  if (eth_dep == TRUE) {
+    arrange_columns <- c("RGN09CD", "Ethnic_Group", 
+                         "Deprivation_Quintile", 
+                         "Sex", "Age_Group")
+    
+    data <- data %>%
+      arrange(across(all_of(arrange_columns))) %>%
+      ethnicity_not_stated_adjustment(proportions = ethnicity_proportions,
+                                      ethnicity_field = Ethnic_Group, 
+                                      deaths_field = {{ deaths_field }}, 
+                                      region_field = RGN09CD, 
+                                      age_field = Age_Group,  
+                                      sex_field = Sex, 
+                                      date_field = Reg_Date) %>%
+      sex_change_0_1(Sex) %>%
+      weekends_to_nearest_work_day(date_field = Reg_Date, 
+                                   agg_field = {{ deaths_field }}) %>%
+      bank_hols_to_nearest_work_day(bank_holidays = bank_holidays, 
+                                    date_field = Reg_Date, 
+                                    agg_field = {{ deaths_field }}) %>%
+      rename(date = Reg_Date,
+             !! new_deaths_field_name := {{ deaths_field }}) %>%
+      mutate(Age_Group = factor(Age_Group),
+             Ethnic_Group = factor(Ethnic_Group),
+             Deprivation_Quintile = factor(Deprivation_Quintile))
+    
+  } else {
+    data <- data %>%
+      aggregate_Scillies_CoL(UTLAApr19CD, {{ deaths_field }})
+    
+    if (all_pod == TRUE) {
+      data <- data %>%
+        arrange(UTLAApr19CD, POD_out, Sex, Age_Group, Reg_Date)
+    } else {
+      data <- data %>%
+        arrange(UTLAApr19CD, Sex, Age_Group, Reg_Date)
+    }
+    
+    data <- data %>%
+      sex_change_0_1(Sex) %>%
+      weekends_to_nearest_work_day(date_field = Reg_Date, 
+                                   agg_field = {{ deaths_field }}) %>%
+      bank_hols_to_nearest_work_day(bank_holidays = bank_holidays, 
+                                    date_field = Reg_Date, 
+                                    agg_field = {{ deaths_field }}) %>%
+      rename(date = Reg_Date,
+             !! new_deaths_field_name := {{ deaths_field }}) %>%
+      mutate(Age_Group = factor(Age_Group))
+  }
+  
+  return(data)
+}
+
+# Write the powerbi collated data to an excel spreadsheet with formatting and 
+# links. This isn't the prettiest code, but it should be reasonably robust
+write_data_server <- function(geography = c("england", "region"), data, folder_path){
+  
+  geography <- match.arg(geography)
+  
+  # data formatting based on whether national or regional
+  if (geography == "england") {
+    data_sheet <- "Excess mortality England data"
+    data_sheet_link <- "National report data"
+    contents_path <- "data/excel_contents.csv"
+    output_path <- paste0(folder_path, "/weekly_chart_data")
+    
+    col_order <- quos(
+      Chart_Name,
+      Region_Code, RGN09NM,
+      Week_End,
+      Age_Group,
+      Sex,
+      Deprivation_Quintile,
+      Ethnic_Group,
+      Cause_Name,
+      Place_of_Death,
+      Mention_of_Covid,
+      Excess_Deaths,
+      ratio
+    )
+    
+    new_names <- quos(
+      "Region Name" = RGN09NM,
+      "Cause of Death" = Cause_Name,
+      "Number of deaths with a mention of COVID-19 on death certificate" = Mention_of_Covid,
+      "Number of Excess Deaths" = Excess_Deaths,
+      "Ratio of registered deaths to expected deaths" = ratio
+    )
+    
+    join_columns <- c("Region_Code" = "RGN09CD")
+    
+    # UTLA lookup
+    geo_lookup <- utla_lookup() %>%
+      distinct(RGN09CD, RGN09NM)
+    
+  } else {
+    data_sheet <- "Excess mortality regional data"
+    data_sheet_link <- "Regional report data"
+    contents_path <- "data/excel_contents_regions.csv"
+    output_path <- paste0(folder_path, "/region_weekly_chart_data")
+    
+    col_order <- quos(
+      Chart_Name,
+      Region_Code, RGN09NM,
+      Period_Start, Period_End,
+      Age_Group,
+      Sex,
+      Deprivation_Quintile,
+      Ethnic_Group,
+      UTLAApr19CD, UTLAApr19NM,
+      Cause_Name,
+      Place_of_Death,
+      Mention_of_Covid,
+      Underlying_cause_covid, Underlying_cause_disease,
+      Excess_Deaths,
+      ratio
+    )
+    
+    new_names <- quos(
+      "Upper Tier Local Authority Code" = UTLAApr19CD,
+      "Upper Tier Local Authority Name" = UTLAApr19NM,
+      "Region Name" = RGN09NM,
+      "Cause of Death" = Cause_Name,
+      "Number of deaths with a mention of COVID-19 on death certificate" = Mention_of_Covid,
+      "Number of Excess Deaths" = Excess_Deaths,
+      "Ratio of registered deaths to expected deaths" = ratio
+    )
+    
+    join_columns <- c("Region_Code" = "RGN09CD", "UTLAApr19CD")
+    
+    # UTLA lookup
+    geo_lookup <- utla_lookup() %>%
+      # sneakily adding rows of just region data with NA UTLA data. Allows one join 
+      # to get everything we need
+      bind_rows(., distinct(., RGN09CD, RGN09NM))
+  }
+  
+  # format data with data from above
+  data <- data %>%
+    left_join(
+      geo_lookup, 
+      by = join_columns
+    ) %>%
+    # reorder columns
+    select(!!! col_order) %>%
+    mutate(
+      Cause_Name = case_when(
+        Chart_Name == "Mention of cause of death" & Cause_Name == "ARI mentions" ~ "Mentions of Acute Respiratory Infections",
+        Chart_Name == "Mention of cause of death" & Cause_Name == "Dementia mentions" ~ "Mentions of Dementia & Alzheimer's disease",
+        Chart_Name == "Mention of cause of death" & Cause_Name == "Diabetes mentions" ~ "Mentions of Diabetes",
+        TRUE ~ Cause_Name
+      )
+    )
+  
+  # use new_names for excel output
+  # csv will just use 'data' (with old names with underscores)
+  data_excel <- data %>%
+    # change names around
+    rename(!!! new_names) %>%
+    # take out underscores in names
+    rename_with(
+      ~ gsub("_", " ", .x)
+    )
+  
+  # Workbook
+  wb <- openxlsx::createWorkbook()
+  openxlsx::addWorksheet(wb, sheetName = "Contents")
+  openxlsx::addWorksheet(wb, sheetName = data_sheet)
+  
+  # Data Sheet
+  # add data to data_sheet
+  openxlsx::writeDataTable(
+    wb, sheet = data_sheet, x = data_excel,
+    colNames = TRUE, rowNames = FALSE,
+    keepNA = TRUE, na.string = "NA",
+    tableStyle = "none",
+    withFilter = FALSE,
+    headerStyle = openxlsx::createStyle(textDecoration = "bold", wrapText = TRUE)
+  )
+  # format data_sheet
+  openxlsx::freezePane(wb, sheet = 2, firstRow = TRUE, firstCol = FALSE)
+  openxlsx::setColWidths(wb, sheet = 2, cols = 1:nrow(data), widths = "auto")
+  
+  # Contents page
+  # read in contents
+  contents <- read_csv(
+    contents_path,
+    na = character(),
+    col_types = cols(
+      text = col_character(),
+      class = col_character(),
+      x = col_character(),
+      y = col_double(),
+      style = col_character(),
+      font_size = col_double()
+    )
+  ) %>% 
+    # add in the date of the latest report
+    mutate(
+      text = case_when(
+        # add the date of the Thursday of the current week
+        # e.g. ran on any day will return the date of the thursday between the 
+        # last sunday and next saturday
+        text == "date" ~ format(Sys.Date() - lubridate::wday(Sys.Date()) + 5, "%d %B %Y"),
+        TRUE ~ text
+      )
+    )
+  
+  # Add in link to data_sheet
+  contents_row <- contents[contents$text == "Contents:", ]
+  # add style before contents, otherwise style seems to get lost
+  openxlsx::addStyle(
+    wb, sheet = "Contents",
+    rows = contents_row$y + 1, 
+    cols = contents_row$x,
+    style = openxlsx::createStyle(
+      textDecoration = contents_row$style,
+      fontSize = contents_row$font_size
+    )
+  )
+  
+  openxlsx::writeFormula(
+    wb, sheet = "Contents",
+    # will go in the cell below the "Contents:"
+    startRow = contents_row$y + 1,
+    startCol = contents_row$x,
+    x = openxlsx::makeHyperlinkString(
+      sheet = data_sheet, row = 1, col = 1, text = data_sheet_link
+    )
+  )
+  
+  # function to help us write into cells with formatting
+  write_cell <- function(workbook, sheet, text, x, y, class, style, font_size){
+    
+    class(text) <- class
+    # as above: add style before contents, otherwise style seems to get lost
+    openxlsx::addStyle(
+      workbook, sheet = sheet,
+      cols = x, rows = y,
+      style = openxlsx::createStyle(textDecoration = style, fontSize = font_size)
+    )
+    
+    openxlsx::writeData(
+      workbook, sheet = sheet, 
+      x = text, xy = c(x, y),
+      colNames = FALSE, rowNames = FALSE
+    )
+  }
+  
+  # walk through our contents data and  write into cells
+  pwalk(
+    .l = contents, 
+    .f = write_cell,
+    workbook = wb,
+    sheet = "Contents"
+  )
+  
+  # Save to excel
+  openxlsx::saveWorkbook(wb, file = paste0(output_path, ".xlsx"), overwrite = TRUE)
+  # Save .csv
+  readr::write_csv(data, paste0(output_path, ".csv"))
+  # Return output_path
+  output_path
+}
+
+# return length of icd codes. If lengths are different error out.
+icd_codes_length <- function(codes){
+  
+  nchars <- unique(nchar(codes))
+  
+  if (length(nchars) > 1){
+    
+    stop("Need consistent length ICD codes")
+    
+  }
+  
+  nchars
+  
+}
+
+# removes columns in a data frame that are only NA or "All"
+remove_columns_with_all_or_nas_only <- function(data) {
+  
+  data_process <- data %>% 
+    dplyr::select(`Chart Group` = type,
+                  `Population Group` = Chart_Name,
+                  `Population Subgroup` = Plot_Label,
+                  `Week Ending` = date,
+                  `Area Code` = RGN09CD,
+                  `Area Name` = RGN09NM,
+                  Sex,
+                  `Ethnic Group` = Ethnic_Group,
+                  `Age Group` = Age_Group,
+                  `Cause of Death` = name_of_cause,
+                  `Place of Death` = POD_out,
+                  `Deprivation Quintile` = Deprivation_Quintile,
+                  `Registered Deaths` = all_dths,
+                  `Expected Deaths` = exptd_dths,
+                  `Deaths with COVID-19 on the Death Certificate` = covid_dths,
+                  `Deaths with COVID-19 as the Underlying Cause` = ucod_covid,
+                  `Deaths with Specific Disease as the Underlying Cause` = ucod_disease)
+  
+  number_of_records <- nrow(data_process)
+  remove_cols <- (colSums(data_process == "All") == number_of_records |
+                    colSums(is.na(data_process)) == number_of_records)
+  
+  remove_cols <- replace(remove_cols, is.na(remove_cols), FALSE)
+  
+  data_process <- data_process[, !remove_cols]
+  
+  data_process <- data_process %>% 
+    mutate(`Excess Deaths` = `Registered Deaths` - `Expected Deaths`,
+           across(any_of(c("Registered Deaths", "Expected Deaths", 
+                           "Excess Deaths", "Deaths with COVID-19 on the Death Certificate")), 
+                  ~round_correct(.x, n = 0))) %>% 
+    relocate(`Excess Deaths`, .after = `Expected Deaths`) %>% 
+    relocate(where(is.numeric), .after = last_col())
+  
+  return(data_process)
+}
+
+add_data_to_excel <- function(data, wb, output_filepath) {
+  data_sheet <- as.character(unique(data$`Chart Group`))
+  
+  # Data Sheet
+  # add data to data_sheet
+  # write_ods(
+  #   x = data,
+  #   path = output_filepath,
+  #   sheet = data_sheet,
+  #   update = TRUE,
+  #   append = TRUE
+  # )
+  openxlsx::addWorksheet(wb, sheetName = data_sheet)
+  openxlsx::writeDataTable(
+    wb, 
+    sheet = data_sheet, 
+    x = data,
+    colNames = TRUE, rowNames = FALSE,
+    keepNA = TRUE, na.string = "NA",
+    tableStyle = "none",
+    withFilter = FALSE,
+    headerStyle = openxlsx::createStyle(textDecoration = "bold", wrapText = TRUE)
+  )
+}
+
+create_excel_file <- function(input_filepath, output_filepath, 
+                              geography = "england") {
+  sheet_references <- read.csv("data/excel_sheet_references.csv") %>% 
+    tibble::deframe()
+  
+  download_data <- read.csv(input_filepath) %>% 
+    mutate(type = factor(type,
+                         levels = names(sheet_references)))
+  
+  download_data <- split(download_data, download_data$type)
+  
+  download_data <- lapply(download_data, 
+                          remove_columns_with_all_or_nas_only)
+  
+  wb <- openxlsx::createWorkbook()
+  openxlsx::addWorksheet(wb, sheetName = "Contents")
+
+  lapply(download_data, add_data_to_excel,
+         wb = wb,
+         output_filepath = output_filepath)
+  
+  if (geography == "england") {
+    contents_path <- "data/excel_contents.csv"
+  } else {
+    contents_path <- "data/excel_contents_regions.csv"
+  }
+  
+  contents <- read_csv(
+    contents_path,
+    na = character(),
+    col_types = cols(
+      text = col_character(),
+      class = col_character(),
+      x = col_character(),
+      y = col_double(),
+      style = col_character(),
+      font_size = col_double()
+    )
+  ) %>% 
+    # add in the date of the latest report
+    mutate(
+      text = case_when(
+        # add the date of the Thursday of the current week
+        # e.g. ran on any day will return the date of the thursday between the 
+        # last sunday and next saturday
+        text == "date" ~ format(Sys.Date() - lubridate::wday(Sys.Date()) + 5, "%d %B %Y"),
+        TRUE ~ text
+      )
+    )
+  
+  # Add in link to data_sheet
+  contents_row <- contents[contents$text == "Contents:", ]
+  # add style before contents, otherwise style seems to get lost
+  
+  for (i in seq_along(download_data)) {
+    
+    openxlsx::addStyle(
+      wb, sheet = "Contents",
+      rows = contents_row$y + i, 
+      cols = contents_row$x,
+      style = openxlsx::createStyle(
+        textDecoration = contents_row$style,
+        fontSize = contents_row$font_size
+      )
+    )
+    
+    openxlsx::writeFormula(
+      wb, sheet = "Contents",
+      # will go in the cell below the "Contents:"
+      startRow = contents_row$y + i,
+      startCol = contents_row$x,
+      x = openxlsx::makeHyperlinkString(
+        sheet = names(download_data)[[i]], row = 1, col = 1, 
+        text = sheet_references[names(download_data)[[i]]]
+      )
+    )
+  }
+  
+  
+  # function to help us write into cells with formatting
+  write_cell <- function(workbook, sheet, text, x, y, class, style, font_size, add_rows, threshold_row){
+    
+    if (y <= threshold_row) add_rows <- 0
+    
+    class(text) <- class
+    # as above: add style before contents, otherwise style seems to get lost
+    openxlsx::addStyle(
+      workbook, sheet = sheet,
+      cols = x, rows = y + add_rows,
+      style = openxlsx::createStyle(textDecoration = style, fontSize = font_size)
+    )
+    
+    openxlsx::writeData(
+      workbook, sheet = sheet, 
+      x = text, xy = c(x, y + add_rows),
+      colNames = FALSE, rowNames = FALSE
+    )
+  }
+  
+  # walk through our contents data and  write into cells
+  pwalk(
+    .l = contents, 
+    .f = write_cell,
+    workbook = wb,
+    sheet = "Contents",
+    add_rows = length(download_data),
+    threshold_row = contents$y[match("Contents:", contents$text)]
+  )
+  
+  openxlsx::saveWorkbook(wb, file = output_filepath, overwrite = TRUE)
+  return(output_filepath)
+}
+
+convert_to_ods <- function(excel_filepath) {
+  library(RDCOMClient)
+  ex <- COMCreate("Excel.Application")
+  book <- ex$Workbooks()$Open(excel_filepath)
+  
+  new_filepath <- gsub("xlsx$", "ods", excel_filepath)
+  new_filepath <- gsub("/", "\\\\", new_filepath)
+  
+  if (file.exists(new_filepath)) file.remove(new_filepath)
+  
+  book$SaveAS(Filename = new_filepath,
+              FileFormat = 60)
+  
+  book$Close()
+  ex$Quit()
+  return(new_filepath)
+}
+
+
+qa_power_bi_file <- function(filepath) {
+  df <- read.csv(filepath)
+  
+  compare_cols <- c("all_dths", "exptd_dths", "covid_dths")
+  
+  
+  # check non-ethnic group totals -------------------------------------------
+  
+  all_person_totals <- df %>% 
+    filter(type == "England") %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  total_checks <- df %>% 
+    filter(Sex == "Persons",
+           RGN09CD == "E92000001",
+           !(type %in% c("England", "all cause")),
+           across(
+             all_of(
+               c("Ethnic_Group", "Age_Group", "POD_out", "Deprivation_Quintile")
+             ),
+             function(x) x %in% c(" All", "All")
+           )) %>% 
+    group_by(type) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  total_checks_ethnicity <- total_checks %>% 
+    filter(type == "Ethnicity")
+  
+  total_checks <- total_checks %>% 
+    filter(type != "Ethnicity")
+  
+  subgroup_age_checks <- df %>% 
+    filter(type == "Age_Group",
+           Age_Group != " All") %>% 
+    mutate(Sex = if_else(Sex == "Persons", "By person", "By gender")) %>% 
+    group_by(type, Sex) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  subgroup_deprivation_checks <- df %>% 
+    filter(type == "deprivation",
+           Deprivation_Quintile != "All") %>% 
+    group_by(type) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  
+  subgroup_pod_checks <- df %>% 
+    filter(type == "pod",
+           POD_out != "All") %>% 
+    group_by(type) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  subgroup_region_checks <- df %>% 
+    filter(type == "region",
+           RGN09CD != "E92000001") %>% 
+    group_by(type) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  subgroup_utla_checks <- df %>% 
+    filter(type == "utla") %>% 
+    group_by(type) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  non_ethnicity_combined <- bind_rows(
+    total_checks,
+    subgroup_age_checks,
+    subgroup_deprivation_checks,
+    subgroup_pod_checks,
+    subgroup_region_checks,
+    subgroup_utla_checks
+  )
+  
+  for (col in compare_cols) {
+    non_ethnicity_combined[[col]] <- non_ethnicity_combined[[col]] - all_person_totals[[col]]
+  }
+  
+  # check ethnic group totals -----------------------------------------------
+  
+  all_person_ethnicity_totals <- df %>% 
+    mutate(date = as.Date(date)) %>% 
+    filter(type == "England", 
+           date != max(date)) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  
+  subgroup_ethnicity_checks <- df %>% 
+    filter(type == "Ethnicity",
+           Ethnic_Group != "All") %>% 
+    mutate(Sex = if_else(Sex == "Persons", "By person", "By gender")) %>% 
+    group_by(type, Sex) %>% 
+    summarise(across(all_of(compare_cols),
+                     sum),
+              .groups = "drop")
+  
+  ethnicity_combined <- bind_rows(
+    total_checks_ethnicity,
+    subgroup_ethnicity_checks
+    
+  )
+  
+  for (col in compare_cols) {
+    ethnicity_combined[[col]] <- ethnicity_combined[[col]] - all_person_ethnicity_totals[[col]]
+  }
+  
+  all_comparisons <- bind_rows(
+    non_ethnicity_combined,
+    ethnicity_combined
+  ) %>% 
+    mutate(across(all_of(compare_cols),
+                  ~ round_correct(.x, n = 4)))
+  return(all_comparisons)
+}
+
+date_as_string <- function(path, 
+                           week_type = c("this week", "last week"),
+                           date_type = c("report end date", "publication date")) {
+  
+  week_type <- match.arg(week_type)
+  date_type <- match.arg(date_type)
+  
+  current_date <- tools::file_path_sans_ext(path) %>% 
+    basename() %>% 
+    stringr::str_extract("[0-9]+") %>% 
+    as.Date("%Y%m%d")
+  
+  if (date_type == "publication date") current_date <- current_date + 13
+  
+  if (week_type == "this week") {
+    date_as_string <- as.character(current_date) %>% 
+      stringr::str_replace_all("-", "")
+  } else if (week_type == "last week") {
+    date_as_string <- as.character(current_date - 7) %>% 
+      stringr::str_replace_all("-", "")
+  }
+  return(date_as_string)
+}
+
+compare_this_and_last_weeks_file <- function(path) {
+  
+  old_path <- str_replace(path, 
+                          date_as_string(path, week_type = "this week"),
+                          date_as_string(path, week_type = "last week"))
+  
+  
+  # calculate the totals for each subgroup ----------------------------------
+
+  compare_cols <- c(registered = "all_dths", 
+                    expected = "exptd_dths", 
+                    covid_mentions = "covid_dths", 
+                    underlying_specific_cause = "ucod_disease", 
+                    underlying_covid = "ucod_covid")
+
+  unnamed_compare_cols <- unname(compare_cols)
+  
+  new_file_totals <- read.csv(path) %>% 
+    group_by(type, Plot_Label, Sex) %>% 
+    filter(date != max(date)) %>% 
+    summarise(across(all_of(unnamed_compare_cols),
+                     sum),
+              .groups = "drop") %>% 
+    rename_with(~ paste0(.x, ".new"), all_of(unnamed_compare_cols))
+  
+  old_file_totals <- read.csv(old_path) %>% 
+    group_by(type, Plot_Label, Sex) %>% 
+    summarise(across(all_of(unnamed_compare_cols),
+                     sum),
+              .groups = "drop") %>% 
+    rename_with(~ paste0(.x, ".old"), all_of(unnamed_compare_cols))
+  
+  data_compared <- new_file_totals %>% 
+    left_join(old_file_totals, by = c("type", "Plot_Label", "Sex")) %>% 
+    tidyr::pivot_longer(cols = !c(type, Plot_Label, Sex),
+                        names_to = "death_type",
+                        values_to = "count") %>% 
+    tidyr::separate(death_type, 
+                    into = c("death_type", "file_type"),
+                    sep = "\\.") %>% 
+    tidyr::pivot_wider(names_from = file_type,
+                       values_from = count) %>% 
+    mutate(across(all_of(c("new", "old")),
+                  function(x) if_else(is.na(x), 0, x)),
+           new_minus_old = new - old,
+           new_minus_old = round_correct(new_minus_old, 1)) %>% 
+    dplyr::select(!c(new, old)) %>% 
+    arrange(desc(abs(new_minus_old))) %>% 
+    left_join(tibble::enframe(compare_cols,
+                              name = "count_type",
+                              value = "death_type"),
+              by = "death_type") %>% 
+    dplyr::select(type, Plot_Label, Sex, count_type, new_minus_old)
+  
+  return(data_compared)
+}
+
+
+aggregate_regional_to_national <- function(regional_data_filepath) {
+  df_region <- read.csv(regional_data_filepath)
+  
+  # this section recreates the "region" type in the national dataframe 
+  # from the region dataframe
+  
+  region_subset <- df_region %>% 
+    filter(type == "England") %>% 
+    mutate(type = "region",
+           RGN09NM = case_when(
+             RGN09NM == "Yorkshire and The Humber" ~ "Yorkshire & Humber",
+             TRUE ~ RGN09NM
+           ),
+           Chart_Name = "Region")
+  
+  df_region_regions <- region_subset %>% 
+    group_by(date, Dispersion_Parameter, days_in_week) %>% 
+    summarise(across(c(all_dths, exptd_dths, covid_dths,
+                       cuml_covid_dths, cuml_all_dths, cuml_exptd_dths,
+                       ucod_covid, ucod_disease),
+                     sum),
+              .groups = "drop") %>% 
+    mutate(excess_deficit = case_when(
+      all_dths < exptd_dths ~ all_dths - exptd_dths, 
+      TRUE ~ as.numeric(0)),
+      tot_excess = case_when(
+        all_dths > exptd_dths ~ all_dths - exptd_dths,
+        TRUE ~ as.numeric(0)
+      ),
+      type = "region",
+      RGN09CD = "E92000001",
+      RGN09NM = "England",
+      Sex = "Persons", 
+      Ethnic_Group = "All", 
+      Age_Group = "All", 
+      name_of_cause = "All", 
+      POD_out = "All", 
+      Deprivation_Quintile = "All",
+      Plot_Label = RGN09NM,
+      Chart_Name = "Region"
+    ) %>% 
+    bind_rows(region_subset) %>% 
+    mutate(RGN09NM = gsub("England", " England", RGN09NM), 
+           Plot_Label = RGN09NM)
+  
+  # this section aggregates all the regional data to england
+  
+  region_aggregated <- df_region %>% 
+    filter(type != "utla") %>% 
+    group_by(type, Sex, Ethnic_Group,
+             Age_Group, name_of_cause, POD_out, Deprivation_Quintile,
+             date, days_in_week, Plot_Label, Chart_Name, Dispersion_Parameter) %>% 
+    summarise(across(c(all_dths, exptd_dths, covid_dths,
+                       cuml_covid_dths, cuml_all_dths, cuml_exptd_dths,
+                       excess_deficit, tot_excess,
+                       ucod_covid, ucod_disease),
+                     sum),
+              .groups = "drop") %>% 
+    mutate(
+      excess_deficit = case_when(
+        all_dths < exptd_dths ~ all_dths - exptd_dths,
+        TRUE ~ as.numeric(0)),
+      tot_excess = case_when(
+        all_dths > exptd_dths ~ all_dths - exptd_dths,
+        TRUE ~ as.numeric(0)
+      ),
+      RGN09CD = "E92000001",
+      RGN09NM = "England",
+    ) %>% 
+    bind_rows(df_region_regions,
+              df_region %>% 
+                filter(type == "utla"))
+  
+  return(region_aggregated)
+}
+

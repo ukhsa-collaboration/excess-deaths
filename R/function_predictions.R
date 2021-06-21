@@ -15,7 +15,10 @@
 #'   the geography in the model). This parameter determines which geography the
 #'   predictions are aggregated to along with facet_fields
 #' @param from_date date; the start date for the predictions
-#' @param to_date date; the final date for the predictions
+#' @param to_date date; the final date for the predictions. This date acts as
+#'   the final date that predictions are required for. If predictions do not
+#'   exist up to that date, they are generated and combined with previously
+#'   calculated predictions
 #' @param directory string; the path to where the predictions files should be
 #'   stored
 #' @param facet_fields character vector up to length 2 (or NULL); use if
@@ -29,20 +32,18 @@
 get_predictions <- function(model_filename, visualisation_geography = NULL,
                             from_date = as.Date("2020-03-01"), to_date = Sys.Date(), 
                             directory = Sys.getenv("PREDICTIONS_FILESHARE"),
-                            ethnicity = FALSE, deprivation = NULL, facet_fields = NULL,
+                            eth_dep = FALSE, facet_fields = NULL,
                             age_filter = NULL, age_group_type = "original") {
 
   
   # check visualisation_geography inputs ------------------------------------
   geography_variable <- vis_geography_variable(visualisation_geography = visualisation_geography,
-                                               ethnicity = ethnicity,
-                                               deprivation = deprivation)  
+                                               eth_dep = eth_dep)  
   
   
   # check category variables ------------------------------------------------
   category_variables <- facet_variables(facet_fields = facet_fields,
-                                        ethnicity = ethnicity,
-                                        deprivation = deprivation)
+                                        eth_dep = eth_dep)
   
   
   # create grouping fields vector -------------------------------------------
@@ -68,15 +69,22 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                  facet_fields = paste(facet_fields, collapse = "_"),
                                  age_filter = age_filter)
   if (file.exists(filename)) {
-    predictions <- read.csv(filename, stringsAsFactors = FALSE)
-    if (as.Date(max(predictions$date)) > Sys.Date()) return(predictions)
+    predictions <- read.csv(filename)
+    if (as.Date(max(predictions$date)) >= to_date) {
+      return(predictions)
+    } else {
+      # if predictions csv already exists, predict new dates only
+      predictions <- predictions %>% 
+        mutate(date = as.Date(date))
+      from_date <- max(predictions[["date"]]) + 1
+      predictions_original <- predictions
+    }
   }
   
   
   denominators <- get_denominators(start_year = year(from_date), 
                                    end_year = year(to_date), 
-                                   ethnicity = ethnicity, 
-                                   deprivation = deprivation,
+                                   eth_dep = eth_dep,
                                    age_filter = age_filter)
   
   
@@ -93,24 +101,16 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                                           start_year = year(from_date),
                                                           end_year = year(to_date),
                                                           utla_lkp = utla_lkp,
-                                                          ethnicity = ethnicity, 
-                                                          deprivation = deprivation,
+                                                          eth_dep = eth_dep,
                                                           age_filter = age_filter)
   
   # preprocess the denominators table
-  if (ethnicity == TRUE) {
+  if (eth_dep == TRUE) {
     denominators <- denominators %>%
-      mutate(Ethnic_Group = factor(Ethnic_Group))
-    
-  } 
-  
-  if (deprivation == TRUE) {
-    denominators <- denominators %>%
+      mutate(Ethnic_Group = factor(Ethnic_Group)) %>%
       mutate(Deprivation_Quintile = factor(Deprivation_Quintile))
     
-  }
-  
-  if (deprivation == FALSE & ethnicity == FALSE) {
+  } else {
     denominators <- denominators %>%
       aggregate_Scillies_CoL(OfficialCode, denominator)
   }
@@ -122,10 +122,9 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
   ### data checks ###
   denominator_post_checks <- post_processed_denominators_checks(denominators = denominators, 
                                                                 total_denominators = denominator_checks$total_denominators, 
-                                                                ethnicity = ethnicity, 
-                                                                deprivation = deprivation)
+                                                                eth_dep = eth_dep)
   
-  if (ethnicity == TRUE | deprivation == TRUE) {
+  if (eth_dep == TRUE) {
     area_codes <- utla_lkp %>%
       pull(RGN09CD) %>%
       unique()
@@ -141,8 +140,7 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                      holidays = holidays, 
                                      denominators = denominators, 
                                      utla_lkp = utla_lkp,
-                                     ethnicity = ethnicity, 
-                                     deprivation = deprivation,
+                                     eth_dep = eth_dep,
                                      age_filter = age_filter,
                                      age_group_type = age_group_type)
   
@@ -160,17 +158,37 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
   predictions <- recent_dates %>%
     mutate(modelled_deaths = p2)
   
-  if (ethnicity != TRUE & deprivation != TRUE) {
+  if (eth_dep == FALSE) {
     predictions <- predictions %>%
       left_join(utla_lkp, by = "UTLAApr19CD")
   }
   
   predictions <- predictions %>%
-    group_by_at(grouping_fields) %>%
+    group_by(across(all_of(grouping_fields))) %>%
     summarise(modelled_deaths = sum(modelled_deaths), 
-              .groups = "keep") %>%
-    ungroup() %>%
+              .groups = "drop") %>%
     add_prediction_intervals(modelled_deaths, dispersion_parameter)
+  
+  if (file.exists(filename)) {
+    # factors
+    cols <- names(Filter(is.factor, predictions))
+    predictions_original <- predictions_original %>% 
+      mutate(across(all_of(cols), factor))
+    
+    # dates
+    cols <- names(Filter(is.Date, predictions))
+    predictions_original <- predictions_original %>% 
+      mutate(across(all_of(cols), as.Date))
+    
+    # integers
+    cols <- names(Filter(is.integer, predictions))
+    predictions_original <- predictions_original %>% 
+      mutate(across(all_of(cols), as.integer))
+    
+    
+    predictions <- bind_rows(predictions_original,
+                             predictions)
+  }
   
   write.csv(predictions,
             file = filename,

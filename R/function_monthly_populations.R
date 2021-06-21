@@ -7,11 +7,11 @@
 #' @param end_year latest year for data generated
 #' @inheritParams get_baseline_deaths
 get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()), 
-                             ethnicity = FALSE, deprivation = FALSE,
+                             eth_dep = FALSE,
                              age_filter = NULL) {
   
   source("R/utils.R")
-  if (deprivation & ethnicity) {
+  if (eth_dep == TRUE) {
     agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "nomis")
   } else {
     agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "original")
@@ -20,126 +20,28 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
   utla_lkp <- utla_lookup()
   
   
-  if (ethnicity == TRUE) {
-    if (deprivation == FALSE) {
-      # calculate the proportion of ethnic groups in each age, sex, region by month
-      
-      url <- "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/populationandmigration/populationestimates/adhocs/008780populationdenominatorsbyethnicgroupregionsandcountriesenglandandwales2011to2017/denominatorsegregions20112018.xls"
-      
-      GET(url, write_disk(tf <- tempfile(fileext = ".xls")))
-      
-      rgn_lkp <- utla_lkp %>% 
-        distinct(RGN09CD, RGN09NM)
-      
-      denominators <- as.character(2013:2018) %>%
-        lapply(function(x) read_excel(tf, sheet = x) %>%
-                 filter(grepl("^E12", area_code)) %>%
-                 dplyr::select(-starts_with("population")) %>%
-                 pivot_longer(cols = White_British:Other_Any_other_ethnic_group,
-                              names_to = "Ethnic_Group", values_to = "Population") %>%
-                 mutate(Ethnic_Group =  gsub("_.*$", "", Ethnic_Group)) %>%
-                 left_join(agegroup_lkp, by = c("age" = "Age")) %>%
-                 group_by(area_name, sex, Age_Group, Ethnic_Group) %>%
-                 summarise(Population = sum(Population), .groups = "keep") %>%
-                 ungroup() %>%
-                 mutate(Period = x)) %>%
-        bind_rows() %>%
-        rename(Sex = sex) %>% 
-        left_join(rgn_lookup(), by = c("area_name")) %>% 
-        left_join(rgn_lkp, by = c("OfficialCode" = "RGN09NM")) %>% 
-        dplyr::select(OfficialCode = RGN09CD, Sex, Age_Group, Ethnic_Group, Period, Population)
-      
-      # where populations aren't published we use the final year population estimates
-      while ((end_year + 1) > max(denominators$Period)) {
-        new_year <- as.character(as.numeric(max(denominators$Period)) + 1)
-        denominators_new <- denominators %>%
-          filter(Period == max(as.numeric(Period))) %>%
-          mutate(Period = new_year)
-        denominators <- bind_rows(denominators,
-                                  denominators_new)
-      }
-      
-      ethnicity_proportions <- denominators %>%
-        mutate(year = as.Date(paste(Period, "7", "1",
-                                    sep = "-"), 
-                              format = "%Y-%m-%d")) %>% 
-        group_by(OfficialCode, Sex, Age_Group, year, Period) %>% 
-        mutate(proportions = Population / (sum(Population))) %>% 
-        ungroup() %>% 
-        dplyr::select(-Population)
-    } else if (deprivation == TRUE) {
-      
-      con <- dbConnect(odbc(), 
-                       Driver = "SQL Server", 
-                       Server = Sys.getenv("DATA_LAKE_SERVER"), 
-                       Database = Sys.getenv("POPULATIONS_DATABASE"), 
-                       Trusted_Connection = "True",
-                       timeout = 60)
-      
-      area_lkup <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("LSOA_DEMOGRAPHICS_TABLE"))) %>% 
-        dplyr::select(LSOA11CD, RGN09CD, Deprivation_Quintile = IMD2019_Quintiles_LSOA11_England) %>% 
-        collect()
-      
-      nomis_age_lkp <- agegroup_lkp %>% 
-        distinct(Age_Group, Age_Group_Nomis)
-      
-      nomis_eth_lkp <- ethnic_groups_lookup() %>% 
-        distinct(Ethnic_Group, Ethnicity_Nomis)
-      
-      time_period <- tibble::tibble(Period = as.character((start_year - 1):(end_year + 1)),
-                                    year = as.Date(paste(Period, "7", "1",
-                                                         sep = "-"), 
-                                                   format = "%Y-%m-%d"))
-      
-      if (file.exists("data/lsoa_eth_pops.csv")) {
-        ethnicity_proportions <- data.table::fread("data/lsoa_eth_pops.csv") %>%
-          as_tibble()
-      } else {
-        continue <- askYesNo("Can't locate file containing ethnicity populations by deprivation in your project, do you want to download these data from NOMIS?\n\nThis will take a few minutes but is a one off download.\n\nYou can't proceed without this file.")
-        
-        if (continue == TRUE) {
-          select_vars <- c("GEOGRAPHY_CODE",
-                           "DATE", "C_SEX", "C_AGE_NAME", "C_ETHPUK11_NAME",
-                           "OBS_VALUE")
-          
-          ethnicity_proportions <- nomis_get_data(id = "NM_801_1",
-                                                  time = "latest",
-                                                  geography = "TYPE298", # LSOA
-                                                  sex = c(1, 2),
-                                                  select = select_vars,
-                                                  c_ethpuk11 = c(1, 6, 11, 17, 21),
-                                                  c_age = 1:4) %>%
-            filter(grepl("^E", GEOGRAPHY_CODE))
-          
-          data.table::fwrite(ethnicity_proportions,
-                             "data/lsoa_eth_pops.csv",
-                             row.names = FALSE)
-        } else {
-          stop("NOMIS ethnicity-deprivation population information required to continue")
-        }
-        
-      }
-      
-      
-      
-      
-      ethnicity_proportions <- ethnicity_proportions %>% 
-        left_join(area_lkup, by = c("GEOGRAPHY_CODE" = "LSOA11CD")) %>% 
-        left_join(nomis_eth_lkp, by = c("C_ETHPUK11_NAME" = "Ethnicity_Nomis")) %>% 
-        transform_nomis_ages(C_AGE_NAME, GEOGRAPHY_CODE, OBS_VALUE) %>% 
-        rename(OfficialCode = RGN09CD, Sex = C_SEX) %>% 
-        group_by(OfficialCode, Sex, Age_Group, Ethnic_Group, Deprivation_Quintile) %>% 
-        summarise(Population = sum(OBS_VALUE), 
-                  .groups = "keep") %>% 
-        group_by(OfficialCode, Sex, Age_Group) %>% 
-        mutate(proportions = Population / (sum(Population))) %>% 
-        ungroup() %>% 
-        dplyr::select(-Population) %>% 
-        full_join(time_period, by = character())
-    }
+  if (eth_dep == TRUE) {
     
-    
-  } 
+    ethnicity_proportions <- read.csv("data/RGN09CD_eth_dep_ipf_estimated.csv") %>% 
+      filter(Year %in% (start_year - 1):(end_year + 1)) %>% 
+      rename(OfficialCode = RGN09CD,
+             Period = Year,
+             Population = population_estimates) %>% 
+      mutate(Sex = case_when(
+        Sex == "Males" ~ 1,
+        Sex == "Females" ~ 2,
+        TRUE ~ -99999),
+        Sex = as.integer(Sex),
+        Period = as.character(Period),
+        year = as.Date(paste(Period, "7", "1",
+                             sep = "-"), 
+                       format = "%Y-%m-%d")) %>% 
+      group_by(Period, year, OfficialCode, Sex, Age_Group, Deprivation_Quintile) %>% 
+      mutate(proportions = Population / (sum(Population))) %>% 
+      ungroup() %>% 
+      dplyr::select(-Population)
+  }
+  
     
   # calculate latest year available in actual pops [vRes_CTRY09_SingleYear]
   con <- dbConnect(odbc(), 
@@ -149,16 +51,14 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
                    Trusted_Connection = "True",
                    timeout = 60)
   
-  
-  latest_pops_year <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("UTLA_FIVE_YR_POPULATIONS_TABLE"))) %>%
+  latest_pops_year <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("UTLA_FIVE_YR_POPULATIONS_TABLE_2020"))) %>%
     summarise(max_year = max(Period, na.rm = TRUE), .groups = "keep") %>%
     collect() %>%
     pull(max_year) %>%
     as.integer()
   
-  
   if (start_year - 1 < latest_pops_year) {
-    if (deprivation == TRUE & ethnicity == FALSE) {
+    if (eth_dep == TRUE) {
       utlas <- utla_lkp %>%
         pull(UTLAApr19CD)
       
@@ -166,7 +66,7 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
         pull(RGN09CD) %>%
         unique()
       
-      age_groups <- age_group_lkp(age_filter = age_filter) %>%
+      age_groups <- agegroup_lkp %>%
         pull(Age_Group) %>%
         unique()
       
@@ -207,7 +107,12 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
                                     sep = "-"), 
                               format = "%Y-%m-%d"))
     } else {
-      pops_table <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("UTLA19_SINGLE_YR_POPULATIONS_TABLE")))
+      utla_19_20_lkp <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("UTLA19_LKP_TABLE"))) %>% 
+        distinct(UTLA19CD, UTLAApr20CD) %>% 
+        rename(OfficialCode = UTLA19CD)
+      pops_table <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("UTLA19_SINGLE_YR_POPULATIONS_TABLE_2020"))) %>% 
+        rename(UTLAApr20CD = OfficialCode) %>% 
+        left_join(utla_19_20_lkp, by = "UTLAApr20CD")
       
       populations <- pops_table %>%
         filter(Period >= (start_year - 1),
@@ -277,7 +182,7 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
                                   sep = "-"), 
                             format = "%Y-%m-%d"))
     
-    if (deprivation == TRUE & ethnicity == FALSE) {
+    if (eth_dep == TRUE) {
       # we don't have a projections file for LSOA populations, 
       # so we use the latest time period from the mid-year populations estimates 
       # to calculate proportions that we then apply to the non-deprivation denominators
@@ -339,8 +244,7 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
       projections <- projections %>% 
         left_join(utla_lkp, by = c("OfficialCode" = "UTLAApr19CD")) %>% 
         group_by(RGN09CD, Sex, Age_Group, Period, year) %>% 
-        summarise(Population = sum(Population), .groups = "keep") %>% 
-        ungroup() %>% 
+        summarise(Population = sum(Population), .groups = "drop") %>% 
         rename(OfficialCode = RGN09CD) %>% 
         left_join(deprivation_proportions, by = c("OfficialCode", "Sex", "Age_Group", "Period", "year")) %>% 
         mutate(Population = Population * proportions) %>% 
@@ -361,15 +265,14 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
   dbDisconnect(con)
     
   # apply the ethnicity proportions to the population
-  if (ethnicity == TRUE) {
-    combined_pops <- combined_pops %>% 
-      left_join(utla_lkp, by = c("OfficialCode" = "UTLAApr19CD")) %>% 
-      group_by(RGN09CD, Sex, Age_Group, year, Period) %>% 
-      summarise(Population = sum(Population), .groups = "drop") %>% 
-      rename(OfficialCode = RGN09CD) %>% 
-      left_join(ethnicity_proportions, by = c("OfficialCode", "Sex", "Age_Group", "year", "Period")) %>% 
-      mutate(Population = Population * proportions) %>% 
-      dplyr::select(-proportions)
+  if (eth_dep == TRUE) {
+      join_groups <- c("OfficialCode", "Sex", "Age_Group", "Deprivation_Quintile", "year", "Period")
+    
+      combined_pops <- combined_pops %>% 
+        left_join(ethnicity_proportions, 
+                  by = join_groups) %>% 
+        mutate(Population = Population * proportions) %>% 
+        dplyr::select(-proportions)
   }
   
   denominators <- combined_pops %>%
@@ -377,48 +280,28 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
     mutate(month = 1L,
            Period = as.integer(Period))
   
-  if (ethnicity == TRUE) {
-    if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        complete(month = seq(from = 1L,
-                             to = 12L),
-                 Period,
-                 OfficialCode,
-                 Sex, 
-                 Age_Group,
-                 Ethnic_Group)
-    } else if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        complete(month = seq(from = 1L,
-                             to = 12L),
-                 Period,
-                 OfficialCode,
-                 Sex, 
-                 Age_Group,
-                 Ethnic_Group,
-                 Deprivation_Quintile)
+  if (eth_dep == TRUE) {
+    denominators <- denominators %>%
+      complete(month = seq(from = 1L,
+                           to = 12L),
+               Period,
+               OfficialCode,
+               Sex, 
+               Age_Group,
+               Ethnic_Group,
+               Deprivation_Quintile)
       
-    }
+   
     
   } else {
-    if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        complete(month = seq(from = 1L,
-                             to = 12L),
-                 Period,
-                 OfficialCode,
-                 Deprivation_Quintile,
-                 Sex, 
-                 Age_Group)
-    } else if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        complete(month = seq(from = 1L,
-                             to = 12L),
-                 Period,
-                 OfficialCode,
-                 Sex, 
-                 Age_Group)
-    }
+    denominators <- denominators %>%
+      complete(month = seq(from = 1L,
+                           to = 12L),
+               Period,
+               OfficialCode,
+               Sex, 
+               Age_Group)
+    
     
   }
   
@@ -442,58 +325,38 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
       days_in_year = end_year - start_year,
       diff_mid_point_mid_yr_est = mid_point_month - start_mid_yr_est)
   
-  if (ethnicity == TRUE) {
-    if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "year", "Population")], 
-                  by = c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "start_mid_yr_est" = "year"))  
-    } else if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "year", "Population")], 
-                  by = c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "start_mid_yr_est" = "year"))  
-      
-    }
+  if (eth_dep == TRUE){
+    denominators <- denominators %>%
+      left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "year", "Population")], 
+                by = c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "start_mid_yr_est" = "year"))  
+    
+    
     
   } else {
-    if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Deprivation_Quintile", "Age_Group", "Sex", "year", "Population")], 
-                  by = c("OfficialCode", "Deprivation_Quintile", "Age_Group", "Sex", "start_mid_yr_est" = "year"))
-      
-    } else if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "year", "Population")], 
-                  by = c("OfficialCode", "Age_Group", "Sex", "start_mid_yr_est" = "year"))
-      
-    }
+    denominators <- denominators %>%
+      left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "year", "Population")], 
+                by = c("OfficialCode", "Age_Group", "Sex", "start_mid_yr_est" = "year"))
+    
+    
   }
+  
   denominators <- denominators %>%
     rename(population1 = Population) %>%
     mutate(later_year_join = start_mid_yr_est + years(1))
   
-  if (ethnicity == TRUE) {
-    if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "year", "Population")], 
-                  by = c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "later_year_join" = "year"))
-    } else if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "year", "Population")], 
-                  by = c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "later_year_join" = "year"))
-      
-    }
+  if (eth_dep == TRUE) {
+    denominators <- denominators %>%
+      left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "year", "Population")], 
+                by = c("OfficialCode", "Age_Group", "Sex", "Ethnic_Group", "Deprivation_Quintile", "later_year_join" = "year"))
+    
+    
   } else {
-    if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Deprivation_Quintile", "Age_Group", "Sex", "year", "Population")], 
-                  by = c("OfficialCode", "Deprivation_Quintile", "Age_Group", "Sex", "later_year_join" = "year"))
-    } else if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "year", "Population")], 
-                  by = c("OfficialCode", "Age_Group", "Sex", "later_year_join" = "year"))
-    }
+    denominators <- denominators %>%
+      left_join(combined_pops[, c("OfficialCode", "Age_Group", "Sex", "year", "Population")], 
+                by = c("OfficialCode", "Age_Group", "Sex", "later_year_join" = "year"))
     
   }
+  
   denominators <- denominators %>%
     rename(population2 = Population) %>%
     dplyr::select(-later_year_join) %>%
@@ -502,23 +365,15 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
            monthly_population = Cal1 * Cal2,
            denominator = monthly_population / as.integer(days_in_month)) #### Divide by days in month to get a daily pop per month
   
-  if (ethnicity == TRUE) {
-    if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        dplyr::select(OfficialCode, Sex, Age_Group, Ethnic_Group, month = start_month, denominator = monthly_population)
-    } else if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        dplyr::select(OfficialCode, Sex, Age_Group, Ethnic_Group, Deprivation_Quintile, month = start_month, denominator = monthly_population)
-    }
+  if (eth_dep == TRUE) {
+    denominators <- denominators %>%
+      dplyr::select(OfficialCode, Sex, Age_Group, Ethnic_Group, Deprivation_Quintile, month = start_month, denominator = monthly_population)
+    
     
   } else {
-    if (deprivation == TRUE) {
-      denominators <- denominators %>%
-        dplyr::select(OfficialCode, Deprivation_Quintile, Sex, Age_Group, month = start_month, denominator = monthly_population)
-    } else if (deprivation == FALSE) {
-      denominators <- denominators %>%
-        dplyr::select(OfficialCode, Sex, Age_Group, month = start_month, denominator = monthly_population)
-    }
+    denominators <- denominators %>%
+      dplyr::select(OfficialCode, Sex, Age_Group, month = start_month, denominator = monthly_population)
+    
     
   }
   
