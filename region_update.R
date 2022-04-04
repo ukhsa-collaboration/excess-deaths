@@ -5,40 +5,46 @@ source("R/utils.R")
 source("R/function_monthly_populations.R")
 source("tests/test-assertr.R")
 source("R/function_deaths_data.R")
-source("R/utils_charts.R")
-source("R/utils_phecharts.R")
 source("R/collate_nat_exmort.R")
-final_date <- final_report_date()
-# final_date <- as.Date("2020-03-27") + 14
 
-caption <- paste("\nLatest week not available as ethnicity has to be assigned via linkage with hospital records")
+# run next line the Friday before the report update 
+check_ethnicity_linkage()
+
+# continue from here for report update
+memory.limit(32698)
+
+final_date <- final_report_date()
+
 ethnic_group_final_date <- final_date - 7
 
 eth_dep_setting <- TRUE
 age_group_type_setting <- "nomis"
 pop_type_setting <- "estimates"
 from_date <- as.Date("2020-03-21")
+# report_type_setting <- "test"
+report_type_setting <- "live"
+
+live_or_test_suffix <- ""
+if (report_type_setting == "test") live_or_test_suffix <- "_test"
 
 rgn_charts <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
                                       visualisation_geography = "region",
-                                      include_covid_ribbon = TRUE, 
                                       end_date = final_date, 
                                       from_date = from_date,
                                       eth_dep = eth_dep_setting, 
-                                      show_inset = TRUE, 
-                                      age_group_type = age_group_type_setting)
+                                      age_group_type = age_group_type_setting,
+                                      report_type = report_type_setting)
 
 rgn_as_charts <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
                                          visualisation_geography = "region",
                                          facet_fields = c("Age_Group", "Sex"),
                                          split_chart = "Sex",
-                                         include_covid_ribbon = TRUE, 
                                          eth_dep = eth_dep_setting, 
                                          end_date = final_date, 
                                          from_date = from_date,
                                          include_totals = TRUE,
-                                         age_group_type = age_group_type_setting, 
-                                         axis_title = "Age group (years)")
+                                         age_group_type = age_group_type_setting,
+                                         report_type = report_type_setting)
 
 utla_charts <- generate_visualisations(paste0("model_outputs/", all_models("UTLA"), ".rds"),
                                        visualisation_geography = "region", 
@@ -46,8 +52,7 @@ utla_charts <- generate_visualisations(paste0("model_outputs/", all_models("UTLA
                                        split_chart = "UTLAApr19CD",
                                        end_date = final_date,
                                        from_date = from_date,
-                                       include_covid_ribbon = TRUE, 
-                                       axis_title = "Upper Tier Local Authority")
+                                       report_type = report_type_setting)
 
 #### ETHNICITY CHARTS ####
 rgn_ethnicity_sex <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
@@ -56,23 +61,20 @@ rgn_ethnicity_sex <- generate_visualisations(paste0("model_outputs/", all_models
                                              split_chart = "Sex",
                                              end_date = ethnic_group_final_date, 
                                              from_date = from_date,
-                                             include_covid_ribbon = TRUE, 
                                              eth_dep = eth_dep_setting, 
-                                             age_group_type = age_group_type_setting, 
-                                             axis_title = "Ethnic group",
-                                             caption = caption)
-#### DEPRIVATION CHARTS ####
-rgn_deprivation <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
-                                           visualisation_geography = "region",
-                                           facet_fields = "Deprivation_Quintile", 
-                                           split_chart = "Deprivation_Quintile",
-                                           end_date = final_date, 
-                                           from_date = from_date,
-                                           include_covid_ribbon = TRUE, 
-                                           eth_dep = eth_dep_setting, 
-                                           age_group_type = age_group_type_setting,
-                                           axis_title = "Deprivation quintile")
+                                             age_group_type = age_group_type_setting,
+                                             report_type = report_type_setting)
 
+### DEPRIVATION BY SEX CHARTS ####
+rgn_deprivation_sex <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
+                                              visualisation_geography = "region",
+                                              facet_fields = c("Deprivation_Quintile", "Sex"),
+                                              split_chart = "Sex",
+                                              end_date = final_date,
+                                              from_date = from_date,
+                                              eth_dep = eth_dep_setting,
+                                              age_group_type = age_group_type_setting,
+                                              report_type = report_type_setting)
 
 #### MORTALITY BY CAUSE OF DEATH ####
 
@@ -97,82 +99,10 @@ all_mentions_data <- model_files %>%
   purrr::map(~ generate_visualisations(ucods = .x[["codes"]][[1]],
                                        cod = .x[["codes"]][[1]],
                                        model_filename = .x[["model_file"]],
-                                       cause_name = "",
-                                       caption = "",
-                                       include_covid_ribbon = FALSE,
                                        end_date = final_date,
                                        from_date = from_date,
                                        visualisation_geography = "region",
-                                       stop_before_visualisation = TRUE))
-
-files <- model_files %>%
-  mutate(model_file = basename(model_file),
-         model_file = xfun::sans_ext(model_file),
-         model_file = paste0(
-           Sys.getenv("POWERBI_FILESHARE"), "/",
-           model_file,
-           "_RGN09CD_ons_aligned_weekly.csv"
-         )
-  ) %>%
-  select(-codes)
-
-regions <- utla_lookup() %>%
-  distinct(RGN09CD, RGN09NM)
-
-cod_plot_data <- pmap(
-  files,
-  function(model_file, reference){
-    read.csv(model_file) %>%
-      mutate(name_of_cause = reference)
-  }
-) %>%
-  bind_rows() %>%
-  filter(name_of_cause != "Epilepsy") %>%
-  mutate(
-    name_of_cause = factor(name_of_cause, levels = c("Ischaemic heart diseases",
-                                                     "Cerebrovascular diseases",
-                                                     "Other circulatory diseases",
-                                                     "Heart failure",
-                                                     "Cancer",
-                                                     "Acute respiratory infections",
-                                                     "Chronic lower respiratory diseases",
-                                                     "Other respiratory diseases",
-                                                     "Dementia and Alzheimer's",
-                                                     "Diseases of the urinary system",
-                                                     "Cirrhosis and other liver diseases",
-                                                     "Diabetes",
-                                                     "Parkinson's disease"
-                                                   )
-                    )
-  ) %>%
-  left_join(regions,
-            by = "RGN09CD") %>%
-  split(.[["RGN09NM"]])
-
-
-rgn_ucods <- map(
-  cod_plot_data,
-  function(.x){
-    cumulative_compare(
-      death_data = .x,
-      area_name = unique(.x[["RGN09NM"]]),
-      date_field = date, 
-      model_field = expected, 
-      deaths_field = registered,
-      covid_field = ucod_covid,
-      axis_field = "name_of_cause",
-      start_date = from_date,
-      subtitle = "",
-      end_date = final_date,
-      axis_title = "Cause of death mentioned on death certificate",
-      caption = "",
-      dispersion_parameter = 1,
-      include_covid_ribbon = FALSE,
-      breakdown_by_ucod = TRUE
-    )
-  }
-)
-
+                                       report_type = report_type_setting))
 
 #### MORTALITY BY PLACE OF DEATH ####
 # All places of death combined
@@ -192,8 +122,7 @@ rgn_all_pods <- generate_visualisations(model_filename = model_files,
                                         visualisation_geography = "region",
                                         facet_fields = "POD_out",
                                         split_chart = "POD_out",
-                                        include_covid_ribbon = TRUE,
-                                        axis_title = "Place of death")
+                                        report_type = report_type_setting)
 
 mysubtitle <- "Experimental Statistics"
 
@@ -206,53 +135,72 @@ icd_references <- model_references() %>%
                 `ICD10 reference` = caption) %>% 
   map_df(rev)
 
-for (reg in names(rgn_charts$weekly_simple)) {
-  reg_file <- gsub(" ", "-", reg)
-  input_params <- list(mytitle = paste("Excess mortality in ", reg, "- 21 March 2020 to", format(final_date, "%d %B %Y")),
-                       mysubtitle = mysubtitle,
-                       author = "[What is an experimental statistic?](https://www.ons.gov.uk/methodology/methodologytopicsandstatisticalconcepts/guidetoexperimentalstatistics)",
-                       rgn_name = reg,
-                       rgn_charts = rgn_charts,
-                       rgn_as_charts = rgn_as_charts,
-                       utla_charts = utla_charts,
-                       rgn_ethnicity_sex = rgn_ethnicity_sex,
-                       rgn_deprivation = rgn_deprivation,
-                       rgn_ucods = rgn_ucods,
-                       rgn_all_pods = rgn_all_pods,
-                       icd_references = icd_references,
-                       period_setting = "weekly")
-  
-  
-  system.time(rmarkdown::render("report/region_report.Rmd",
-                                params = input_params,
-                                output_file = paste0("excess-mortality-in-", reg_file, "-21-March-2020-to-", format(final_date, "%d-%B-%Y"), ".html")))
+# this steps creates both the national and the regional data
+path_region <- collate_powerbi_files_for_powerbi(geography = "region", 
+                                                 final_date = final_date,
+                                                 report_type = report_type_setting)
+
+path_national <- gsub("region", "england", path_region)
+
+generate_regional_date_csv_lookup()
+
+
+# QA the numbers ----------------------------------------------------------
+# bear in mind, all persons, age group, region, ethnicity-sex, deprivation-sex are all the same model
+# this table shows the difference between the cumulative all persons deaths (registered, expected and covid) 
+# compared to the totals within each subpopulation, and also the subgroups within each 
+# subpopulation aggregated (ie, each place of death added together).
+# The table is filtered for comparisons where any of registered, expected or covid deaths aren't 0
+
+qa_region <- qa_power_bi_file(path_region,
+                              
+                       geography = "region") %>% 
+  filter(all_dths != 0 |
+           exptd_dths != 0 |
+           covid_dths != 0)
+
+
+if (!Sys.getenv("USERNAME") %in% c("sebastian.fox", "sam.dunn")) View(qa_region) # Add in not in
+
+write.csv(qa_region,
+          paste0(Sys.getenv("POWERBI_FILESHARE"),
+                 "/qa/region_compared_to_all_persons_",
+                 gsub("-", "", as.character(final_date)),
+                 live_or_test_suffix,
+                 ".csv"),
+          row.names = FALSE)
+
+qa_national <- qa_power_bi_file(path_national)
+
+if (!Sys.getenv("USERNAME") %in% c("sebastian.fox", "sam.dunn")) View(qa_national) # Add in not in
+
+write.csv(qa_national,
+          paste0(Sys.getenv("POWERBI_FILESHARE"),
+                 "/qa/compared_to_all_persons_",
+                 gsub("-", "", as.character(final_date)),
+                 live_or_test_suffix,
+                 ".csv"),
+          row.names = FALSE)
+
+# a function that will remove the aggregated England records from the regional
+# powerbi csv file so the regional file can be compared like-for-like with the
+# national file
+remove_aggregated_england_records <- function(filename) {
+  if (grepl("region", filename)) {
+    data <- read.csv(filename) %>% 
+      filter(RGN09CD != "E92000001")
+  } else {
+    data <- read.csv(filename)
+  }
+  return(data)
 }
-
-source("tests/test-regional_report_totals.R")
-# This checks the totals of all the tables in each report with the cumulative chart for each report
-checks <- perform_regional_checks(region_charts = rgn_charts,
-                                  age_sex_charts = rgn_as_charts,
-                                  ethnicity_sex_charts = rgn_ethnicity_sex,
-                                  deprivation_charts = rgn_deprivation,
-                                  all_utla_charts = utla_charts,
-                                  ucod_charts = rgn_ucods,
-                                  pod_charts = rgn_all_pods)
-View(checks)
-
 
 # this checks the totals for the regional reports for the mentions charts 
 # against the equivalent totals in the national report
-path_region <- collate_powerbi_files_for_powerbi(geography = "region", 
-                                                 final_date = final_date)
-
-path_national <- collate_powerbi_files_for_powerbi(geography = "england", 
-                                                   final_date = final_date)
-
-
 compare_mentions_region_national <- list(region = path_region,
                                          national = path_national) %>% 
   lapply(function(x) x %>% 
-           read.csv() %>% 
+           remove_aggregated_england_records() %>% 
            filter(type == "all cause") %>% 
            group_by(Chart_Name) %>% 
            summarise(across(c(all_dths, exptd_dths, ucod_covid, ucod_disease),
@@ -263,8 +211,136 @@ compare_mentions_region_national <- list(region = path_region,
                                values_to = "val")) %>% 
   reduce(left_join, by = c("Chart_Name", "type")) %>% 
   mutate(region_minus_national = val.x - val.y) %>% 
-  filter(region_minus_national != 0) %>% 
   dplyr::select(!c(val.x, val.y)) %>% 
   arrange(desc(abs(region_minus_national)))
 
-View(compare_mentions_region_national)
+if (!Sys.getenv("USERNAME") %in% c("sebastian.fox", "sam.dunn")) View(compare_mentions_region_national)
+
+write.csv(compare_mentions_region_national,
+          paste0(Sys.getenv("POWERBI_FILESHARE"),
+                 "/qa/region_vs_national_mentions_compared_",
+                 gsub("-", "", as.character(final_date)),
+                 live_or_test_suffix,
+                 ".csv"),
+          row.names = FALSE)
+
+# This checks this month's data with what was published last month
+# Bear in mind that cause of death is updated on death certificate over time
+compared_to_last_month <- compare_this_and_last_weeks_file(path_region,
+                                                           geography = "region")
+
+if (!Sys.getenv("USERNAME") %in% c("sebastian.fox", "sam.dunn")) View(compared_to_last_month) # add in not in
+
+write.csv(compared_to_last_month,
+          paste0(Sys.getenv("POWERBI_FILESHARE"),
+                 "/qa/region_compared_to_last_month_",
+                 gsub("-", "", as.character(final_date)),
+                 live_or_test_suffix,
+                 ".csv"),
+          row.names = FALSE)
+
+# This checks this week's national data with what was published last week
+compared_to_last_week <- compare_this_and_last_weeks_file(path_national)
+
+if (!Sys.getenv("USERNAME") %in% c("sebastian.fox", "sam.dunn")) View(compared_to_last_week) # add in not in
+
+write.csv(compared_to_last_week,
+          paste0(Sys.getenv("POWERBI_FILESHARE"),
+                 "/qa/compared_to_last_week_",
+                 gsub("-", "", as.character(final_date)),
+                 live_or_test_suffix,
+                 ".csv"),
+          row.names = FALSE)
+
+# Create an excel file containing all of the data for public use --------
+
+xlsx_file_region <- create_excel_file(input_filepath = path_region,
+                                      output_filepath = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                                                               "/RegionalEMData", 
+                                                               live_or_test_suffix,
+                                                               ".xlsx"),
+                                      geography = "region")
+
+xlsx_file_national <- create_excel_file(input_filepath = path_national,
+                                        output_filepath = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                                                                 "/EMData", 
+                                                                 live_or_test_suffix,
+                                                                 ".xlsx"),
+                                        geography = "england")
+
+
+# Install RDCOMClient from binaries ---------------------------------------
+
+if (!require(RDCOMClient)) {
+  #url <- "http://www.omegahat.net/R/bin/windows/contrib/4.0.0/RDCOMClient_0.94-0.zip"
+  #install.packages(url, repos = NULL, type = "binary")
+  devtools::install_github("dkyleward/RDCOMClient") # could create snap shot with this. - library command line 98
+}
+detach("package:RDCOMClient", unload = TRUE)
+
+if (Sys.getenv("USERNAME") == "sam.dunn") library(RDCOMClient, lib.loc = paste0("C:/Users/",Sys.getenv("USERNAME"),"/Documents/R/win-library/4.0")) # wouldn't need if added to renv.
+
+library(RDCOMClient)
+
+# Convert the Excel file to ods -------------------------------------------
+convert_to_ods(xlsx_file_region)
+
+convert_to_ods(xlsx_file_national)
+
+# move ods file to E&S fileshare
+# archive existing file
+
+old_filename <- paste0(Sys.getenv("E_AND_S_FILESHARE"),
+                       "RegionalEMData",
+                       date_as_string(path_region, 
+                                      week_type = "first friday last month",
+                                      date_type = "publication date"),
+                       # live_or_test_suffix,
+                       ".ods")
+
+current_filename <- paste0(Sys.getenv("E_AND_S_FILESHARE"),
+                           "RegionalEMData", 
+                           live_or_test_suffix,
+                           ".ods")
+# if last week's file hasn't been archived already with a date stamp, then do it
+if (!file.exists(old_filename))
+  file.copy(from = current_filename,
+            to = old_filename)
+
+# then copy the version created from the "convert_to_ods()" above over the 
+# previous "current" version for putting on the website
+file.copy(from = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                        "/RegionalEMData", 
+                        live_or_test_suffix,
+                        ".ods"),
+          to = current_filename,
+          overwrite = TRUE)
+
+old_filename <- paste0(Sys.getenv("E_AND_S_FILESHARE"),
+                       "EMData",
+                       date_as_string(path_national, 
+                                      week_type = "last week",
+                                      date_type = "publication date"),
+                       live_or_test_suffix,
+                       ".ods")
+
+current_filename <- paste0(Sys.getenv("E_AND_S_FILESHARE"),
+                           "EMData", 
+                           live_or_test_suffix,
+                           ".ods")
+# if last week's file hasn't been archived already with a date stamp, then do it
+if (!file.exists(old_filename))
+  file.copy(from = current_filename,
+            to = old_filename)
+
+# then copy the version created from the "convert_to_ods()" above over the 
+# previous "current" version for putting on the website
+file.copy(from = paste0(Sys.getenv("POWERBI_FILESHARE"),
+                        "/EMData.ods"),
+          to = current_filename,
+          overwrite = TRUE)
+
+# Compare the regional registered, covid and excess deaths with what the ONS
+# have published
+ons_vs_ohid <- compare_regional_to_ons()
+View(ons_vs_ohid)

@@ -5,8 +5,6 @@ source("R/utils.R")
 source("R/function_monthly_populations.R")
 source("tests/test-assertr.R")
 source("R/function_deaths_data.R")
-source("R/utils_charts.R")
-source("R/utils_phecharts.R")
 source("R/collate_nat_exmort.R")
 source("R/function_modelling.R")
 source("tests/test-assertr.R")
@@ -14,7 +12,7 @@ source("tests/test-assertr.R")
 causes_of_death <- cause_code_lookup(table_output = TRUE)
 
 # date of my newly run models with mentions and underlying causes
-date <- "20210302"
+date <- "20220211"
 
 # all our cause names and a fileame for the models
 names <- causes_of_death %>%
@@ -30,10 +28,10 @@ names <- causes_of_death %>%
     file_name = str_to_lower(file_name),
     file_name = paste0(date, "_", file_name, "_mentions")
   ) %>%
-  # arranged by count for when I was testing to see which query was too big, 
+  # arranged by count for when I was testing to see which query was too big,
   # not really necessary
   arrange(count) %>%
-  select(-count)
+  dplyr::select(-count)
 
 denominators <- get_denominators(start_year = 2015,
                                  end_year = 2019,
@@ -63,16 +61,36 @@ pwalk(.l = names, .f = make_mention_models,
 )
 
 
+
+# create cancer models ----------------------------------------------------
+cancers <- cause_code_lookup(table_output = TRUE, 
+                             detail_cancers = TRUE) %>% 
+  filter(grepl("^C", ICD_codes))
+
+date <- "20220110"
+
+cancer_names <- cancers %>%
+  filter(!name_of_cause %in% c("COVID-19", "All other causes (excl. COVID-19)")) %>%
+  count(name_of_cause) %>%
+  mutate(
+    # take out underscores
+    file_name = gsub(" ", "_", name_of_cause),
+    # take out everything but letters and underscores
+    file_name = gsub("[^[:alpha:]|_]", "", file_name),
+    file_name = str_to_lower(file_name),
+    file_name = paste0(date, "_", file_name, "_mentions")
+  ) %>% 
+  dplyr::select(!c(n))
+
+# walk through the names dataframe to make models
+pwalk(.l = cancer_names[cancer_names$name_of_cause == "colon_sigmoid_rectum_anus_cancer", ],
+      .f = make_mention_models,
+      causes_of_death = cancers,
+      denominators = denominators
+)
+
 # stolen form england_update.R -------------------------------------------------
 final_date <- final_report_date()
-
-caption <- paste("\nLatest week not available as ethnicity has to be assigned via linkage with hospital records")
-ethnic_group_final_date <- final_date - 7
-
-
-eth_dep_setting <- TRUE
-age_group_type_setting <- "nomis" 
-pop_type_setting <- "estimates"
 from_date <- as.Date("2020-03-21")
 
 
@@ -88,21 +106,21 @@ make_visualisations <- function(name_of_cause, file_name, causes_of_death){
     cod = codes,
     model_filename = paste0("model_outputs/", file_name, ".rds"),
     cause_name = paste0("all mentions of ", name_of_cause),
-    include_covid_ribbon = FALSE,
     end_date = final_date,
     from_date = from_date,
-    visualisation_geography = "england"
+    visualisation_geography = "region"
   )
-
+  
 }
 
 # make our visualisations
-pwalk(.l = names, .f = make_visualisations,
-      causes_of_death = causes_of_death
+pwalk(.l = cancer_names[cancer_names$name_of_cause == "colon_sigmoid_rectum_anus_cancer", ], 
+      .f = make_visualisations,
+      causes_of_death = cancers
 )
 
 # Heart failure
-date <- "20210302"
+date <- "20220211"
 
 name_of_cause <- "Heart failure"
 file_name <- paste0(date, "_heart_failure_mentions")
@@ -117,17 +135,4 @@ model <- make_mention_models(name_of_cause, file_name, heart_failure_codes, deno
 plots <- make_visualisations(name_of_cause, file_name, heart_failure_codes)
 
 
-# Epilepsy
-date <- "20210309"
 
-name_of_cause <- "Epilepsy"
-file_name <- paste0(date, "_epilepsy_mentions")
-
-epilepsy_codes <- tibble(
-  name_of_cause = name_of_cause,
-  ICD_codes = c(paste0("G40", 0:9), "G410", "G411", "G412", "G418", "G419", "R568")
-)
-
-# walk through the names dataframe to make models
-model <- make_mention_models(name_of_cause, file_name, epilepsy_codes, denominators)
-plots <- make_visualisations(name_of_cause, file_name, epilepsy_codes)

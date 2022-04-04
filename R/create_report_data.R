@@ -1,31 +1,28 @@
 generate_report_data <- function(final_date, eth_dep_setting,
                                  age_group_type_setting,
-                                 pop_type_setting, from_date) {
+                                 pop_type_setting, from_date,
+                                 report_type = "live") {
   
   print("creating england data")
   eng_charts <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
                                         visualisation_geography = "england",
-                                        include_covid_ribbon = TRUE, 
                                         end_date = final_date, 
                                         from_date = from_date,
                                         eth_dep = eth_dep_setting, 
-                                        show_inset = TRUE,
                                         age_group_type = age_group_type_setting,
-                                        stop_before_visualisation = TRUE)
+                                        report_type = report_type)
   
   print("creating age-sex data")
   eng_as_charts <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
                                            visualisation_geography = "england",
                                            facet_fields = c("Age_Group", "Sex"),
                                            split_chart = "Sex",
-                                           include_covid_ribbon = TRUE, 
                                            end_date = final_date, 
                                            from_date = from_date,
                                            eth_dep = eth_dep_setting, 
-                                           axis_title = "Age group (years)",
                                            include_totals = TRUE,
                                            age_group_type = age_group_type_setting,
-                                           stop_before_visualisation = TRUE)
+                                           report_type = report_type)
   
   print("creating regions data")
   region_charts <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
@@ -34,82 +31,34 @@ generate_report_data <- function(final_date, eth_dep_setting,
                                            split_chart = "RGN09CD",
                                            end_date = final_date,
                                            from_date = from_date,
-                                           include_covid_ribbon = TRUE, 
                                            eth_dep = eth_dep_setting, 
-                                           axis_title = "Region",
                                            age_group_type = age_group_type_setting,
-                                           stop_before_visualisation = TRUE)
+                                           report_type = report_type)
   
   #### ETHNICITY CHARTS ####
   print("creating ethnicity-sex data")
-  england_ethnicity_sex <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
+  england_ethnicity_sex <- generate_visualisations(model_filename =  paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
                                                    eth_dep = eth_dep_setting, 
                                                    visualisation_geography = "england",
                                                    facet_fields = c("Ethnic_Group", "Sex"), 
                                                    split_chart = "Sex",
                                                    end_date = ethnic_group_final_date, 
                                                    from_date = from_date,
-                                                   include_covid_ribbon = TRUE, 
-                                                   axis_title = "Ethnic group",
                                                    age_group_type = age_group_type_setting,
-                                                   # age_filter = c(0, 74),
-                                                   stop_before_visualisation = TRUE)
+                                                   report_type = report_type)
   
   #### DEPRIVATION CHARTS ####
-  # england_eth_dep <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
-  #                                            eth_dep = eth_dep_setting, 
-  #                                            visualisation_geography = "england",
-  #                                            facet_fields = c("Deprivation_Quintile", "Ethnic_Group"),
-  #                                            split_chart = "Ethnic_Group",
-  #                                            end_date = final_date, 
-  #                                            from_date = from_date,
-  #                                            include_covid_ribbon = TRUE, 
-  #                                            axis_title  = "Deprivation quintile",
-  #                                            age_group_type = age_group_type_setting,
-  #                                            age_filter = c(0, 74),
-  #                                            stop_before_visualisation = TRUE)
-  
-  print("creating deprivation data")
-  england_deprivation <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
-                                                 eth_dep = eth_dep_setting, 
-                                                 visualisation_geography = "england",
-                                                 facet_fields = "Deprivation_Quintile", 
-                                                 split_chart = "Deprivation_Quintile",
-                                                 end_date = final_date, 
-                                                 from_date = from_date,
-                                                 include_covid_ribbon = TRUE, 
-                                                 axis_title  = "Deprivation quintile",
-                                                 age_group_type = age_group_type_setting,
-                                                 # age_filter = c(0, 74),
-                                                 stop_before_visualisation = TRUE)
-  
-  # england_deprivation_u75 <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
-  #                                                    eth_dep = eth_dep_setting, 
-  #                                                    visualisation_geography = "england",
-  #                                                    facet_fields = "Deprivation_Quintile", 
-  #                                                    split_chart = "Deprivation_Quintile",
-  #                                                    end_date = final_date, 
-  #                                                    from_date = from_date,
-  #                                                    include_covid_ribbon = TRUE, 
-  #                                                    axis_title  = "Deprivation quintile",
-  #                                                    age_group_type = age_group_type_setting,
-  #                                                    age_filter = c(0, 74),
-  #                                            stop_before_visualisation = TRUE))
-  # 
-  # england_deprivation_o75 <- generate_visualisations(paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
-  #                                                    eth_dep = eth_dep_setting, 
-  #                                                    visualisation_geography = "england",
-  #                                                    facet_fields = "Deprivation_Quintile", 
-  #                                                    split_chart = "Deprivation_Quintile",
-  #                                                    end_date = final_date, 
-  #                                                    from_date = from_date,
-  #                                                    include_covid_ribbon = TRUE, 
-  #                                                    axis_title  = "Deprivation quintile",
-  #                                                    age_group_type = age_group_type_setting,
-  #                                                    age_filter = c(75, NA),
-  #                                            stop_before_visualisation = TRUE))
-  
-  
+  print("creating deprivation sex data")
+  england_deprivation_sex <- generate_visualisations(model_filename = paste0("model_outputs/", all_models("Ethnicity-deprivation"), ".rds"),
+                                                     eth_dep = eth_dep_setting,
+                                                     visualisation_geography = "england",
+                                                     facet_fields = c("Deprivation_Quintile", "Sex"),
+                                                     split_chart = "Sex",
+                                                     end_date = final_date,
+                                                     from_date = from_date,
+                                                     age_group_type = age_group_type_setting,
+                                                     report_type = report_type)
+ 
   # UTLA --------------------------------------------------------------------
   print("creating utla data")
   utla_charts <- generate_visualisations(paste0("model_outputs/", all_models("UTLA"), ".rds"),
@@ -118,10 +67,8 @@ generate_report_data <- function(final_date, eth_dep_setting,
                                          split_chart = "UTLAApr19CD",
                                          end_date = final_date,
                                          from_date = from_date,
-                                         include_covid_ribbon = TRUE,
                                          eth_dep = FALSE,
-                                         axis_title = "Upper Tier Local Authority",
-                                         stop_before_visualisation = TRUE)
+                                         report_type = report_type)
   
   #### MORTALITY BY CAUSE OF DEATH ####
   
@@ -147,12 +94,10 @@ generate_report_data <- function(final_date, eth_dep_setting,
     purrr::map(~ generate_visualisations(ucods = .x[["codes"]][[1]],
                                          cod = .x[["codes"]][[1]],
                                          model_filename = .x[["model_file"]],
-                                         cause_name = "",
-                                         include_covid_ribbon = FALSE,
                                          end_date = final_date,
                                          from_date = from_date,
                                          visualisation_geography = "england",
-                                         stop_before_visualisation = TRUE))
+                                         report_type = report_type))
   
   #### MORTALITY BY PLACE OF DEATH ####
   # All places of death combined
@@ -172,9 +117,7 @@ generate_report_data <- function(final_date, eth_dep_setting,
                                       visualisation_geography = "england",
                                       facet_fields = "POD_out",
                                       split_chart = "POD_out",
-                                      include_covid_ribbon = TRUE,
-                                      axis_title = "Place of death",
-                                      stop_before_visualisation = TRUE)
+                                      report_type = report_type)
   
   
   # check that all objects exist --------------------------------------------
@@ -182,7 +125,7 @@ generate_report_data <- function(final_date, eth_dep_setting,
                         "eng_as_charts",
                         "region_charts",
                         "utla_charts",
-                        "england_deprivation",
+                        "england_deprivation_sex",
                         "england_ethnicity_sex",
                         "all_mentions_data",
                         "all_pods")

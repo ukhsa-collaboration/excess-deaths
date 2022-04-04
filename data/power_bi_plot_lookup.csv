@@ -1,0 +1,29 @@
+type,name_of_cause,POD_out,Chart_Name
+England,All,All,England
+utla,All,All,UTLA
+Acute respiratory infections,All,All,ARI mentions
+Dementia,All,All,Dementia mentions
+Diabetes mellitus,All,All,Diabetes mentions
+Age_Group,All,All,Age-Sex
+Ethnicity,All,All,Ethnicity-Sex
+dep_u75,All,All,Deprivation
+dep_o75,All,All,Deprivation
+dep_ethnicity,All,All,Ethnicity-deprivation
+region,All,All,Region
+all cause,Ischaemic heart diseases,All,Ischaemic heart diseases
+all cause,Cerebrovascular diseases,All,Cerebrovascular diseases
+all cause,Other circulatory diseases,All,Other circulatory diseases
+all cause,Cancer,All,Cancer
+all cause,Acute respiratory infections,All,Acute respiratory infections
+all cause,Chronic lower respiratory diseases,All,Chronic lower respiratory diseases
+all cause,Other respiratory diseases,All,Other respiratory diseases
+all cause,Dementia and Alzheimer's,All,Dementia and Alzheimer's
+all cause,Diseases of the urinary system,All,Diseases of the urinary system
+all cause,Cirrhosis and other liver diseases,All,Cirrhosis and other liver diseases
+all cause,Parkinson's disease,All,Parkinson's disease
+all cause,Other causes (excl. COVID-19),All,Other causes (excl. COVID-19)
+pod,All,Care home (nursing or residential),Care home (nursing or residential)
+pod,All,Home,Home
+pod,All,Hospice,Hospice
+pod,All,"Hospital (acute or community, not psychiatric)","Hospital (acute or community, not psychiatric)"
+pod,All,Other places,Other places

@@ -5,17 +5,38 @@
 #'   ONS projected population estimates are used
 #' @param start_year earliest year for data generated
 #' @param end_year latest year for data generated
+#' @param use_2020_populations logical; if 2020 populations are available for
+#'   both LTLA and LSOA then use them. We aren't going to use them initially
+#'   because the 2020 estimates incorporate a lot of wave 1 deaths which we are
+#'   trying to account for by doing mortality displacement analysis initially
+#'   and then working out whether or not to include the population estimates
+#' @param age_group_type string; "original", "nomis", "bespoke" are accepted
+#'   inputs. If "bespoke" is used, then the bespoke_age_groups parameter needs
+#'   to be provided
+#' @param bespoke_age_groups tibble; two fields - Age and Age_Group. Age contains
+#'   integers and Age_Group is a character class displaying the age group that
+#'   that age is assigned to
 #' @inheritParams get_baseline_deaths
 get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()), 
                              eth_dep = FALSE,
-                             age_filter = NULL) {
+                             age_filter = NULL,
+                             use_2020_populations = FALSE,
+                             age_group_type = NULL,
+                             bespoke_age_groups = NULL) {
   
   source("R/utils.R")
-  if (eth_dep == TRUE) {
-    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "nomis")
+  if (is.null(age_group_type)) {
+    if (eth_dep == TRUE) {
+      agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "nomis")
+    } else {
+      agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "original")
+    }
   } else {
-    agegroup_lkp <- age_group_lkp(age_filter = age_filter, type = "original")
+    agegroup_lkp <- age_group_lkp(age_filter = age_filter, 
+                                  type = age_group_type,
+                                  bespoke_age_groups = bespoke_age_groups)
   }
+  
   
   utla_lkp <- utla_lookup()
   
@@ -51,11 +72,35 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
                    Trusted_Connection = "True",
                    timeout = 60)
   
-  latest_pops_year <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("UTLA_FIVE_YR_POPULATIONS_TABLE_2020"))) %>%
+  latest_pops_year <- tbl(con, 
+                          in_schema(
+                            sql(Sys.getenv("POPULATIONS_DATABASE")), 
+                            sql(Sys.getenv("UTLA_FIVE_YR_POPULATIONS_TABLE_2020")))
+                          ) %>%
+    summarise(max_year = max(Period, na.rm = TRUE), 
+              .groups = "keep") %>%
+    collect() %>%
+    pull(max_year) %>%
+    as.integer()
+  
+  latest_lsoa_pops_year <- tbl(con, 
+                               in_schema(
+                                 sql(Sys.getenv("POPULATIONS_DATABASE")), 
+                                 sql(Sys.getenv("LSOA11_SINGLE_YR_POPULATIONS_TABLE")))
+                               ) %>% 
     summarise(max_year = max(Period, na.rm = TRUE), .groups = "keep") %>%
     collect() %>%
     pull(max_year) %>%
     as.integer()
+  
+  latest_pops_year <- min(latest_pops_year,
+                          latest_lsoa_pops_year)
+  
+  # avoid using 2020 pop estimates because they contain deaths from the pandemic.
+  # Our predictions are assuming the pandemic hasn't happened
+
+  if (latest_pops_year == 2020 &
+      use_2020_populations == FALSE) latest_pops_year <- 2019
   
   if (start_year - 1 < latest_pops_year) {
     if (eth_dep == TRUE) {
@@ -70,8 +115,16 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
         pull(Age_Group) %>%
         unique()
       
-      pops_table <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("LSOA11_SINGLE_YR_POPULATIONS_TABLE")))
-      area_lkup <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("LSOA_DEMOGRAPHICS_TABLE")))
+      pops_table <- tbl(con, 
+                        in_schema(
+                          sql(Sys.getenv("POPULATIONS_DATABASE")), 
+                          sql(Sys.getenv("LSOA11_SINGLE_YR_POPULATIONS_TABLE")))
+      )
+      area_lkup <- tbl(con, 
+                       in_schema(
+                         sql(Sys.getenv("LOOKUPS_DATABASE")), 
+                         sql(Sys.getenv("LSOA_DEMOGRAPHICS_TABLE")))
+      )
       
       populations <- pops_table %>%
         filter(Period >= (start_year - 1),
@@ -92,7 +145,8 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
         left_join(area_lkup, by = c("OfficialCode" = "LSOA11CD")) %>%
         left_join(agegroup_lkp, by = "Age", copy = TRUE) %>%
         group_by(RGN09CD, IMD2019_Quintiles_LSOA11_England, Period, Sex, Age_Group) %>%
-        summarise(Population = sum(Population, na.rm = TRUE)) %>% 
+        summarise(Population = sum(Population, na.rm = TRUE),
+                  .groups = "drop") %>% 
         rename(Deprivation_Quintile = IMD2019_Quintiles_LSOA11_England,
                OfficialCode = RGN09CD) %>%
         collect() %>%
@@ -107,13 +161,21 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
                                     sep = "-"), 
                               format = "%Y-%m-%d"))
     } else {
-      utla_19_20_lkp <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("UTLA19_LKP_TABLE"))) %>% 
-        distinct(UTLA19CD, UTLAApr20CD) %>% 
+      utla_19_20_lkp <- tbl(con, 
+                            in_schema(
+                              sql(Sys.getenv("LOOKUPS_DATABASE")), 
+                              sql(Sys.getenv("UTLA19_LKP_TABLE")))
+                            ) %>% 
+        distinct(UTLA19CD, UTLA20CD) %>% 
         rename(OfficialCode = UTLA19CD)
-      pops_table <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("UTLA19_SINGLE_YR_POPULATIONS_TABLE_2020"))) %>% 
-        rename(UTLAApr20CD = OfficialCode) %>% 
-        left_join(utla_19_20_lkp, by = "UTLAApr20CD")
-      
+      pops_table <- tbl(con, 
+                        in_schema(
+                          sql(Sys.getenv("POPULATIONS_DATABASE")), 
+                          sql(Sys.getenv("UTLA19_SINGLE_YR_POPULATIONS_TABLE_2020")))
+                        ) %>% 
+        rename(UTLA20CD = OfficialCode) %>% 
+        left_join(utla_19_20_lkp, by = "UTLA20CD")
+
       populations <- pops_table %>%
         filter(Period >= (start_year - 1),
                Period <= latest_pops_year,
@@ -131,7 +193,8 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
       populations <- populations %>%
         left_join(agegroup_lkp, by = "Age", copy = TRUE) %>%
         group_by(OfficialCode, Period, Sex, Age_Group) %>%
-        summarise(Population = sum(Population, na.rm = TRUE)) %>% 
+        summarise(Population = sum(Population, na.rm = TRUE),
+                  .groups = "drop") %>% 
         collect() %>%
         ungroup() %>%
         mutate(year = as.Date(paste(Period, "7", "1",
@@ -153,8 +216,17 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
       year_filter <- start_year - 2
     }
     
-    projections_table <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("LTLA13_POPULATION_PROJECTIONS_TABLE")))
-    lkup <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("LTLA_LKP_TABLE")))
+    projections_table <- tbl(con, 
+                             in_schema(
+                               sql(Sys.getenv("POPULATIONS_DATABASE")),
+                               sql(Sys.getenv("LTLA13_POPULATION_PROJECTIONS_TABLE")))
+    )
+    
+    lkup <- tbl(con, 
+                in_schema(
+                  sql(Sys.getenv("LOOKUPS_DATABASE")), 
+                  sql(Sys.getenv("LTLA_LKP_TABLE")))
+    )
     
     projections <- projections_table %>%
       filter(Period > year_filter,
@@ -175,7 +247,8 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
       left_join(lkup, by = c("OfficialCode" = "LTLA13CD")) %>%
       group_by(UTLA19CD, Period, Sex, Age_Group) %>% 
       filter(ONSPubDate == min(ONSPubDate, na.rm = TRUE)) %>% 
-      summarise(Population = sum(Population, na.rm = TRUE)) %>%
+      summarise(Population = sum(Population, na.rm = TRUE),
+                .groups = "drop") %>%
       rename(OfficialCode = UTLA19CD) %>%
       collect() %>% 
       mutate(year = as.Date(paste(Period, "7", "1",
@@ -195,12 +268,22 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
         pull(RGN09CD) %>%
         unique()
 
-      age_groups <- age_group_lkp(age_filter = age_filter) %>%
+      age_groups <- age_group_lkp(age_filter = age_filter,
+                                  type = "nomis") %>%
         pull(Age_Group) %>%
         unique()
       
-      pops_table <- tbl(con, in_schema(Sys.getenv("POPULATIONS_DATABASE"), Sys.getenv("LSOA11_SINGLE_YR_POPULATIONS_TABLE")))
-      area_lkup <- tbl(con, in_schema(Sys.getenv("LOOKUPS_DATABASE"), Sys.getenv("LSOA_DEMOGRAPHICS_TABLE")))
+      pops_table <- tbl(con, 
+                        in_schema(
+                          sql(Sys.getenv("POPULATIONS_DATABASE")), 
+                          sql(Sys.getenv("LSOA11_SINGLE_YR_POPULATIONS_TABLE")))
+                        )
+      
+      area_lkup <- tbl(con, 
+                       in_schema(
+                         sql(Sys.getenv("LOOKUPS_DATABASE")), 
+                         sql(Sys.getenv("LSOA_DEMOGRAPHICS_TABLE")))
+                       )
       
       periods <- tibble(Period = as.character((year_filter + 1):(end_year + 1)))
       
@@ -222,7 +305,8 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
         left_join(area_lkup, by = c("OfficialCode" = "LSOA11CD")) %>%
         left_join(agegroup_lkp, by = "Age", copy = TRUE) %>%
         group_by(RGN09CD, IMD2019_Quintiles_LSOA11_England, Sex, Age_Group) %>%
-        summarise(Population = sum(Population, na.rm = TRUE)) %>% 
+        summarise(Population = sum(Population, na.rm = TRUE),
+                  .groups = "drop") %>% 
         rename(Deprivation_Quintile = IMD2019_Quintiles_LSOA11_England,
                OfficialCode = RGN09CD) %>%
         collect() %>%
@@ -244,7 +328,8 @@ get_denominators <- function(start_year = 2015L, end_year = year(Sys.Date()),
       projections <- projections %>% 
         left_join(utla_lkp, by = c("OfficialCode" = "UTLAApr19CD")) %>% 
         group_by(RGN09CD, Sex, Age_Group, Period, year) %>% 
-        summarise(Population = sum(Population), .groups = "drop") %>% 
+        summarise(Population = sum(Population), 
+                  .groups = "drop") %>% 
         rename(OfficialCode = RGN09CD) %>% 
         left_join(deprivation_proportions, by = c("OfficialCode", "Sex", "Age_Group", "Period", "year")) %>% 
         mutate(Population = Population * proportions) %>% 

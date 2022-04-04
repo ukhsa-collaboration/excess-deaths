@@ -33,8 +33,8 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                             from_date = as.Date("2020-03-01"), to_date = Sys.Date(), 
                             directory = Sys.getenv("PREDICTIONS_FILESHARE"),
                             eth_dep = FALSE, facet_fields = NULL,
-                            age_filter = NULL, age_group_type = "original") {
-
+                            age_filter = NULL, age_group_type = "original", 
+                            bespoke_age_groups = NULL) {
   
   # check visualisation_geography inputs ------------------------------------
   geography_variable <- vis_geography_variable(visualisation_geography = visualisation_geography,
@@ -54,6 +54,16 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
   # these fields need to be removed from the grouping variables
   remove_fields <- c("name_of_cause", "POD_out")
   grouping_fields <- grouping_fields[!(grouping_fields %in% remove_fields)]
+  
+  # change to_date to be the Friday after the last day of the year containing to_date
+  last_day_of_year <- as.Date(paste0(year(to_date),
+                                     "-12-31"))
+  if (wday(last_day_of_year) == 7) { # if last date of year is Saturday
+    days_until_following_fri <- 6  
+  } else {
+    days_until_following_fri <- 6 - wday(last_day_of_year)
+  }
+  to_date <- last_day_of_year + days_until_following_fri
   
   
   # create directory if it doesn't exist already
@@ -85,13 +95,16 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
   denominators <- get_denominators(start_year = year(from_date), 
                                    end_year = year(to_date), 
                                    eth_dep = eth_dep,
-                                   age_filter = age_filter)
+                                   age_filter = age_filter,
+                                   age_group_type = age_group_type,
+                                   bespoke_age_groups = bespoke_age_groups)
   
   
   # get holiday dates
-  holidays <- timeDate::holidayLONDON(year(from_date):year(to_date)) #get vector of bank holidays
-  holidays <- as.Date(holidays)
-  holidays <- replace(holidays, holidays == as.Date("2020-05-04"), as.Date("2020-05-08"))
+  holidays <- holiday_dates(
+    from_date = from_date,
+    to_date = to_date
+  )
   
   ## get utla lookup
   utla_lkp <- utla_lookup()
@@ -102,7 +115,9 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                                           end_year = year(to_date),
                                                           utla_lkp = utla_lkp,
                                                           eth_dep = eth_dep,
-                                                          age_filter = age_filter)
+                                                          age_filter = age_filter,
+                                                          age_group_type = age_group_type,
+                                                          bespoke_age_groups = bespoke_age_groups)
   
   # preprocess the denominators table
   if (eth_dep == TRUE) {
@@ -142,7 +157,8 @@ get_predictions <- function(model_filename, visualisation_geography = NULL,
                                      utla_lkp = utla_lkp,
                                      eth_dep = eth_dep,
                                      age_filter = age_filter,
-                                     age_group_type = age_group_type)
+                                     age_group_type = age_group_type,
+                                     bespoke_age_groups = bespoke_age_groups)
   
   ##### BEGIN PREDICTING ######
   

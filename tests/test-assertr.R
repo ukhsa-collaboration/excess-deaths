@@ -1,5 +1,4 @@
 pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, eth_dep, 
-                                       deaths_reallocated,
                                        all_pod = FALSE) {
   
   ### data checks ###
@@ -8,8 +7,7 @@ pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, eth_dep,
   
   all_dates <- data.frame(dates = seq(from = date_range[1],
                                       to = date_range[2],
-                                      by = "days")) %>%
-    adjust_first_date(dates, holidays) %>%
+                                      by = "weeks")) %>%
     pull(dates)
   
   all_age_groups <- length(unique(deaths_data$Age_Group))
@@ -74,84 +72,49 @@ pre_processed_death_checks <- function(deaths_data, utla_lkp, holidays, eth_dep,
     summarise(deaths_total = sum(deaths_total)) %>%
     pull() # for later checks
   
-  if (deaths_reallocated == TRUE) {
-    dates_around_holidays <- c(holidays, (holidays - 1), (holidays + 1))
-    
-    total_deaths_around_hols_weekends <- deaths_data %>%
-      filter(wday(Reg_Date) %in% c(1, 2, 6, 7) |
-               Reg_Date %in% dates_around_holidays) %>%
-      summarise(deaths_total = sum(deaths_total)) %>%
-      pull() # for later checks
-    
-    check_results <- list(expected_records = expected_records,
-                          total_deaths = total_deaths,
-                          total_deaths_around_hols_weekends = total_deaths_around_hols_weekends)
-  } else if (deaths_reallocated == FALSE) {
-    check_results <- list(expected_records = expected_records,
-                          total_deaths = total_deaths)
-  }
+  check_results <- list(expected_records = expected_records,
+                        total_deaths = total_deaths)
   
   return(check_results)
 }
 
 post_processed_death_checks <- function(deaths_data, holidays, total_deaths, 
                                         total_deaths_around_hols_weekends = NULL, eth_dep, 
-                                        deaths_reallocated, deaths_field, 
-                                        days_reallocated = deaths_reallocated) {
+                                        deaths_reallocated, deaths_field) {
 
-  if (deaths_reallocated == TRUE) {
-    
-    if (days_reallocated == TRUE) {
-      test_days <- in_set(2, 3, 4, 5, 6)
-    } else {
-      test_days <- in_set(1, 2, 3, 4, 5, 6, 7)
-    }
-    
-    dates_around_holidays <- c(holidays, (holidays - 1), (holidays + 1))
-    deaths_data <- deaths_data %>%
-      mutate(weekday = wday(date),
-             around_hol_we_deaths = case_when(
-               wday(date) %in% c(1, 2, 6, 7) |
-                 date %in% dates_around_holidays ~ {{ deaths_field }},
-               TRUE ~ 0),
-             hol_deaths = case_when(
-               wday(date) %in% c(1, 7) |
-                 date %in% holidays ~ {{ deaths_field }},
-               TRUE ~ 0)) %>%
-      chain_start() %>%
-      verify(round_correct(sum(around_hol_we_deaths), 8) == 
-               round_correct(total_deaths_around_hols_weekends, 8)) %>%
-      assert(test_days, weekday) %>%
-      verify(sum(hol_deaths) == 0) %>%
-      chain_end()
-  } else if (deaths_reallocated == FALSE) {
-    deaths_data <- deaths_data %>%
-      mutate(weekday = wday(date)) %>%
-      assert(in_set(1, 2, 3, 4, 5, 6, 7), weekday)
-  }
+  
   deaths_data %>%
+    mutate(weekday = wday(date)) %>%
     chain_start() %>%
+    assert(in_set(6), weekday) %>%
     assert(not_na, everything()) %>%
     verify(round_correct(sum({{ deaths_field }}), 8) == round_correct(total_deaths, 8)) %>%
     assert(in_set(0, 1), Sex) %>%
     assert(is.factor, Sex, Age_Group) %>%
     chain_end()
   
-  if (eth_dep == TRUE) deaths_data %>%
-    assert(is.factor, Ethnic_Group) %>%
-    assert(is.factor, Deprivation_Quintile)
-  
+  if (eth_dep == TRUE) {
+    deaths_data %>%
+      assert(is.factor, Ethnic_Group) %>%
+      assert(is.factor, Deprivation_Quintile)
+    
+  }
+    
   return(TRUE)
 }
 
 pre_processed_denominators_checks <- function(denominators, start_year, end_year, 
-                                              utla_lkp, eth_dep, age_filter) {
+                                              utla_lkp, eth_dep, age_filter,
+                                              age_group_type,
+                                              bespoke_age_groups) {
   
   if (eth_dep == TRUE) {
     expected_records_denominators <- length(start_year:end_year) *
       12 * #months
       2 * #sex
-      length(unique(age_group_lkp(age_filter = age_filter)$Age_Group)) *
+      length(unique(age_group_lkp(age_filter = age_filter,
+                                  type = age_group_type,
+                                  bespoke_age_groups = bespoke_age_groups)$Age_Group)) *
       length(unique(utla_lkp$RGN09CD)) *
       length(unique(denominators$Ethnic_Group)) *
       length(1:5) #deprivation
@@ -170,7 +133,9 @@ pre_processed_denominators_checks <- function(denominators, start_year, end_year
     expected_records_denominators <- length(start_year:end_year) *
       12 * #months
       2 * #sex
-      length(unique(age_group_lkp(age_filter = age_filter)$Age_Group)) *
+      length(unique(age_group_lkp(age_filter = age_filter,
+                                  type = age_group_type,
+                                  bespoke_age_groups = bespoke_age_groups)$Age_Group)) *
       length(unique(utla_lkp$UTLAApr19CD))
     
     denominators %>%
@@ -196,8 +161,11 @@ post_processed_denominators_checks <- function(denominators, total_denominators,
     assert(in_set(0, 1), Sex) %>%
     assert(is.factor, Sex, Age_Group)
   
-  if (eth_dep == TRUE) denominators %>%
-    assert(is.factor, Ethnic_Group) %>%
-    assert(is.factor, Deprivation_Quintile)
+  if (eth_dep == TRUE) {
+    denominators %>%
+      assert(is.factor, Ethnic_Group) %>%
+      assert(is.factor, Deprivation_Quintile)
+  }
+  
   return(TRUE)
 }

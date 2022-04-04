@@ -5,15 +5,6 @@
 #'   of the output of the get_denominators() function
 #' @param model_filename string; name of file to be saved as output (extension
 #'   is not required)
-#' @param include_date_extension logical; whether the date is automatically
-#'   appended to the file name
-#' @param disease_name string; name of the disease for the model. This string is
-#'   used to filter the comparability ratio Excel file, so the string must match
-#'   the spelling used in that file
-#' @param include_ethnicity_uplift logical; whether ethnicity baseline deaths
-#'   should be uplifted to the same totals as the annual deaths file. Ethnic
-#'   group for individuals is obtains from HES records. If an individual hasn't
-#'   been to hospital, they won't be in the ethnicity deaths file
 #' @param age_filter numeric vector (length 2); an upper and lower threshold to
 #'   truncate the age range for analysis. Can use NA for either value if ages up
 #'   to the limit should be considered (ie, c(50, NA) will consider ages between
@@ -21,63 +12,62 @@
 #' @return string presenting the location of the model file generated
 
 create_baseline <- function(denominators = NULL,
-                            ucod = NULL, btw_ucod = NULL, ucods = NULL, cod = NULL,
+                            ucod = NULL, ucods = NULL, cod = NULL,
                             pod = NULL, eth_dep = FALSE,
-                            model_filename, include_date_extension = FALSE,
-                            disease_name = NULL, include_ethnicity_uplift = FALSE, age_filter = NULL,
-                            age_group_type = "original") {
+                            model_filename, 
+                            age_filter = NULL,
+                            age_group_type = "original",
+                            bespoke_age_groups = NULL) {
  
   # create directory if it doesn't exist already
   dir.create("model_outputs", showWarnings = FALSE)
-  if (include_date_extension == TRUE) {
-    model_filename <- paste0("model_outputs/", model_filename, gsub("[[:punct:]]", "", Sys.Date()), ".rds")
-  } else {
-    model_filename <- paste0("model_outputs/", model_filename, ".rds")
-  }
+  
+   model_filename <- paste0("model_outputs/", model_filename, ".rds")
+  
   
   ###-------------### BRING THE DATA IN TO THE ENVIRONMENT ###------------###
   baseline_data <- get_baseline_deaths(ucod = ucod, 
-                                       btw_ucod = btw_ucod, 
                                        ucods = ucods,
                                        cod = cod,
                                        pod = pod, 
                                        eth_dep = eth_dep, 
-                                       include_ethnicity_uplift = include_ethnicity_uplift,
                                        age_filter = age_filter,
-                                       age_group_type = age_group_type)
+                                       age_group_type = age_group_type,
+                                       bespoke_age_groups = bespoke_age_groups)
   
   if (is.null(denominators)) {
     denominators <- get_denominators(start_year = min(year(baseline_data$Reg_Date)),
                                      end_year = max(year(baseline_data$Reg_Date)),
                                      eth_dep = eth_dep,
-                                     age_filter = age_filter)
+                                     age_filter = age_filter,
+                                     bespoke_age_groups = bespoke_age_groups)
   }
   
   utla_lkp <- utla_lookup()
   
+  from_date <- as.Date("2015-01-01")
+  to_date <- as.Date("2019-12-31")
+  
   # get holiday dates
-  holidays <- timeDate::holidayLONDON(year(min(baseline_data$Reg_Date)):year(Sys.Date())) #get vector of bank holidays
-  holidays <- as.Date(holidays)
-  holidays <- replace(holidays, holidays == as.Date("2020-05-04"), as.Date("2020-05-08"))
-  
-  # remove first day of series if a bank holiday or weekend
-  baseline_data <- baseline_data %>%
-    adjust_first_date(Reg_Date, holidays)
-  
+  holidays <- holiday_dates(
+    from_date = from_date,
+    to_date = to_date
+  )
   
   ### data checks ###
   death_checks <- pre_processed_death_checks(baseline_data, 
                                              utla_lkp, 
                                              holidays,
-                                             eth_dep = eth_dep,
-                                             deaths_reallocated = TRUE)
+                                             eth_dep = eth_dep)
   
   denominator_checks <- pre_processed_denominators_checks(denominators, 
                                                           start_year = min(year(baseline_data$Reg_Date)),
                                                           end_year = max(year(baseline_data$Reg_Date)),
                                                           utla_lkp = utla_lkp,
                                                           eth_dep = eth_dep,
-                                                          age_filter = age_filter)
+                                                          age_filter = age_filter,
+                                                          age_group_type = age_group_type,
+                                                          bespoke_age_groups = bespoke_age_groups)
   
   ###-------------### DATA PREPARATION ###------------###
   
@@ -86,7 +76,12 @@ create_baseline <- function(denominators = NULL,
     denominators <- denominators %>%
         mutate(Ethnic_Group = factor(Ethnic_Group),
                Deprivation_Quintile = factor(Deprivation_Quintile, 
-                                             levels = as.character(1:5)))
+                                             levels = as.character(1:5))) %>% 
+      rename(RGN09CD = OfficialCode)
+  } else if (eth_dep == FALSE) {
+    denominators <- denominators %>% 
+      aggregate_Scillies_CoL(OfficialCode, denominator) %>% 
+      rename(UTLAApr19CD = OfficialCode)
   }
   
   denominators <- denominators %>%
@@ -109,9 +104,8 @@ create_baseline <- function(denominators = NULL,
                         holidays = holidays) %>%
       mutate(Ethnic_Group = factor(Ethnic_Group),
              Deprivation_Quintile = factor(Deprivation_Quintile, 
-                                           levels = as.character(1:5))) %>%
-      left_join(denominators, by = c("RGN09CD" = "OfficialCode", "Ethnic_Group", "Deprivation_Quintile", "Sex", "Age_Group", "month")) %>%
-      dplyr::select(-month)
+                                           levels = as.character(1:5)))
+    
   } else {
     baseline_data <- baseline_data %>%
       aggregate_Scillies_CoL(UTLAApr19CD, deaths_total) %>%
@@ -120,10 +114,7 @@ create_baseline <- function(denominators = NULL,
                         death_field = deaths_total, 
                         sex_field = Sex, 
                         age_group_field = Age_Group, 
-                        holidays = holidays) %>%
-      left_join(denominators, by = c("UTLAApr19CD" = "OfficialCode", "Sex", "Age_Group", "month")) %>%
-      dplyr::select(-month)
-    
+                        holidays = holidays)
     
   }
   
@@ -133,35 +124,46 @@ create_baseline <- function(denominators = NULL,
                                                     total_deaths = death_checks$total_deaths,
                                                     total_deaths_around_hols_weekends = death_checks$total_deaths_around_hols_weekends,
                                                     eth_dep = eth_dep,
-                                                    deaths_reallocated = TRUE,
                                                     deaths_field = deaths_total)
   
-  # calculate easter Fridays
-  easter_fridays <- calc_easter_fridays(holidays)
-  non_easter_non_xmas_hols <- calc_non_easter_non_xmas_hols(holidays, easter_fridays)
+  
   ###------------### Add predictor variables to baseline data ###------------###
-  # browser()
+  
+  # aggregate denominator data to weekly
+  denominators <- weekly_denominators(
+    denominators = denominators,
+    from_date = from_date,
+    to_date = to_date
+  )
+  
+  # create date dependent variables
+  hol_vars <- weekly_holiday_variables(
+    from_date = from_date,
+    to_date = to_date,
+    holidays = holidays
+  )
+  
+  trend_var <- weekly_trend_variable(
+    from_date = from_date,
+    to_date = to_date
+  )
+  
+  seasonal_vars <- weekly_seasonal_variables(
+    from_date = from_date,
+    to_date = to_date
+  )
+  
+  date_dependent_variables <- hol_vars %>% 
+    left_join(seasonal_vars, by = "date") %>% 
+    left_join(trend_var, by = "date")
+  
   baseline_data <- baseline_data %>%
-    add_easter_binary_variables(date, easter_fridays) %>%
-    add_bh_binary_variables(date_field = date, day_field = day, non_easter_non_xmas_hols) %>%
-    add_day_weighting(date_field = date) %>% 
-    pivot_wider(names_from = month,
-                names_prefix = "month",
-                values_from = month_val,
-                values_fill = list(month_val = 0)) %>%
-    arrange(date) %>% 
-    mutate(day1 = if_else(day == "2", 1L, 0L),
-           day2 = if_else(day == "3", 1L, 0L),
-           day3 = if_else(day == "4", 1L, 0L),
-           day4 = if_else(day == "5", 1L, 0L),
-           day5 = if_else(day == "6", 1L, 0L)) %>% 
-    dplyr::select(-day) %>%
-    ungroup()
+    # add the aggregated denominator for each subgroup
+    left_join(denominators, by = intersect(names(.), 
+                                           names(denominators))) %>% 
+    left_join(date_dependent_variables,
+              by = "date")
   
-  
-  baseline_data <- convert_to_weekly_for_modelling(data = baseline_data,
-                                                   from_date = min(baseline_data$date),
-                                                   to_date = max(baseline_data$date))
   modelling_variables <- "deaths_total ~ offset(log(denominator)) +
                            years_from_20161231 +
                            month1:Age_Group + month2:Age_Group + 
@@ -172,7 +174,7 @@ create_baseline <- function(denominators = NULL,
                            month11:Age_Group + month12:Age_Group +
                            easter_pre + easter_post_1 + easter_post_2 +
                            wk_nearest_BH + wk_next_nearest_BH +
-                           wk_fri_xmas + wk_post_fri_xmas + wk2_post_fri_xmas"
+                           wk_sat_to_mon_xmas + wk_post_sat_to_mon_xmas + wk2_post_sat_to_mon_xmas"
     
   cat("building model...")
   start_time <- Sys.time()

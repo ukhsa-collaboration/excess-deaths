@@ -1,0 +1,26 @@
+Type: project
+Description: Modelling excess mortality in England by population subgoup through the pandemic
+Depends:
+  DBI,
+  odbc,
+  tidyr,
+  dbplyr,
+  lubridate,
+  httr,
+  nomisr,
+  readxl,
+  timeDate,
+  ggplot2,
+  MASS,
+  slider,
+  purrr,
+  lme4,
+  assertr,
+  dtplyr,
+  dplyr,
+  stringr,
+  gt,
+  readr,
+  emayili,
+  keyring
+Remotes: url::http://www.omegahat.net/R/bin/windows/contrib/4.0.0/RDCOMClient_0.94-0.zip

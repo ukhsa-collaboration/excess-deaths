@@ -1,0 +1,9 @@
+text,class,x,y,style,font_size
+Excess Mortality in England,character,A,1,bold,14
+This file contains data released in OHID's reports on excess mortality in England:,character,A,3,,12
+https://app.powerbi.com/view?r=eyJrIjoiYmUwNmFhMjYtNGZhYS00NDk2LWFlMTAtOTg0OGNhNmFiNGM0IiwidCI6ImVlNGUxNDk5LTRhMzUtNGIyZS1hZDQ3LTVmM2NmOWRlODY2NiIsImMiOjh9,hyperlink,A,4,,12
+Contents:,character,A,6,bold,12
+Further information about the data included here can be found in an accompanying methodology document:,character,A,9,,12
+https://www.gov.uk/government/publications/excess-mortality-in-england-weekly-reports,hyperlink,A,10,,12
+Office for Health Improvement and Disparities,character,A,12,bold,12
+date,character,A,13,bold,12
